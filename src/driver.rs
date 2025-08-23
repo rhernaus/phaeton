@@ -4,11 +4,17 @@
 //! that coordinates all the different components of the system.
 
 use crate::config::Config;
+use crate::controls::{ChargingControls, ChargingMode, StartStopState};
+use crate::dbus::DbusService;
 use crate::error::Result;
-use crate::logging::{get_logger, LogContext};
-use crate::modbus::ModbusConnectionManager;
+use crate::logging::{LogContext, get_logger};
+use crate::modbus::{
+    ModbusConnectionManager, decode_32bit_float, decode_64bit_float, decode_string,
+};
+use crate::persistence::PersistenceManager;
+use crate::session::ChargingSessionManager;
 use tokio::sync::{mpsc, watch};
-use tokio::time::{interval, Duration};
+use tokio::time::{Duration, interval};
 
 /// Main driver state
 #[derive(Debug, Clone)]
@@ -42,6 +48,26 @@ pub struct AlfenDriver {
 
     /// Shutdown receiver
     shutdown_rx: mpsc::UnboundedReceiver<()>,
+
+    /// Persistence manager
+    persistence: PersistenceManager,
+
+    /// Session manager
+    sessions: ChargingSessionManager,
+
+    /// D-Bus service (stub)
+    dbus: Option<DbusService>,
+
+    /// Controls logic
+    controls: ChargingControls,
+
+    /// Control state
+    current_mode: ChargingMode,
+    start_stop: StartStopState,
+    intended_set_current: f32,
+    station_max_current: f32,
+    last_sent_current: f32,
+    last_current_set_time: std::time::Instant,
 }
 
 impl AlfenDriver {
@@ -71,6 +97,16 @@ impl AlfenDriver {
             logger,
             shutdown_tx,
             shutdown_rx,
+            persistence: PersistenceManager::new("/data/phaeton_state.json"),
+            sessions: ChargingSessionManager::default(),
+            dbus: None,
+            controls: ChargingControls::new(),
+            current_mode: ChargingMode::Manual,
+            start_stop: StartStopState::Stopped,
+            intended_set_current: 0.0,
+            station_max_current: 32.0,
+            last_sent_current: 0.0,
+            last_current_set_time: std::time::Instant::now(),
         })
     }
 
@@ -83,6 +119,41 @@ impl AlfenDriver {
 
         // Update state to running
         self.state.send(DriverState::Running).ok();
+
+        // Initialize D-Bus service (stub) and start
+        let mut dbus = DbusService::new().await?;
+        dbus.start().await?;
+        self.dbus = Some(dbus);
+
+        // Initialize control state from config defaults
+        self.intended_set_current = self.config.defaults.intended_set_current;
+        self.station_max_current = self.config.defaults.station_max_current;
+        if let Some(dbus) = &mut self.dbus {
+            let _ = dbus
+                .update_paths([
+                    (
+                        "/DeviceInstance".to_string(),
+                        serde_json::json!(self.config.device_instance),
+                    ),
+                    (
+                        "/ProductName".to_string(),
+                        serde_json::json!("Alfen EV Charger"),
+                    ),
+                    (
+                        "/Mode".to_string(),
+                        serde_json::json!(self.current_mode as u8),
+                    ),
+                    (
+                        "/StartStop".to_string(),
+                        serde_json::json!(self.start_stop as u8),
+                    ),
+                    (
+                        "/SetCurrent".to_string(),
+                        serde_json::json!(self.intended_set_current),
+                    ),
+                ])
+                .await;
+        }
 
         // Main polling loop
         let mut poll_interval = interval(Duration::from_millis(self.config.poll_interval_ms));
@@ -125,13 +196,249 @@ impl AlfenDriver {
     /// Single polling cycle
     async fn poll_cycle(&mut self) -> Result<()> {
         self.logger.debug("Starting poll cycle");
+        // Read measurements from Modbus
+        if let Some(manager) = &mut self.modbus_manager {
+            let socket_id = self.config.modbus.socket_slave_id;
+            let addr_voltages = self.config.registers.voltages;
+            let addr_currents = self.config.registers.currents;
+            let addr_power = self.config.registers.power;
+            let addr_energy = self.config.registers.energy;
+            let addr_status = self.config.registers.status;
+            let addr_amps = self.config.registers.amps_config;
+            let station_id = self.config.modbus.station_slave_id;
+            let addr_station_max = self.config.registers.station_max_current;
 
-        // TODO: Implement actual polling logic
-        // 1. Read charger status
-        // 2. Read power/energy data
-        // 3. Apply control logic
-        // 4. Update D-Bus paths
-        // 5. Update web status
+            // Voltages L1..L3 (6 registers -> 3 floats)
+            let voltages = manager
+                .execute_with_reconnect(|client| {
+                    Box::pin(async move {
+                        client
+                            .read_holding_registers(socket_id, addr_voltages, 6)
+                            .await
+                    })
+                })
+                .await
+                .ok();
+
+            // Currents L1..L3 (6 registers -> 3 floats)
+            let currents = manager
+                .execute_with_reconnect(|client| {
+                    Box::pin(async move {
+                        client
+                            .read_holding_registers(socket_id, addr_currents, 6)
+                            .await
+                    })
+                })
+                .await
+                .ok();
+
+            // Power block (8 registers -> 3 phases + total)
+            let power_regs = manager
+                .execute_with_reconnect(|client| {
+                    Box::pin(async move {
+                        client
+                            .read_holding_registers(socket_id, addr_power, 8)
+                            .await
+                    })
+                })
+                .await
+                .ok();
+
+            // Energy (4 registers -> f64 Wh)
+            let energy_regs = manager
+                .execute_with_reconnect(|client| {
+                    Box::pin(async move {
+                        client
+                            .read_holding_registers(socket_id, addr_energy, 4)
+                            .await
+                    })
+                })
+                .await
+                .ok();
+
+            // Socket status string (5 registers)
+            let status_regs = manager
+                .execute_with_reconnect(|client| {
+                    Box::pin(async move {
+                        client
+                            .read_holding_registers(socket_id, addr_status, 5)
+                            .await
+                    })
+                })
+                .await
+                .ok();
+
+            // Station max current (optional refresh)
+            if let Ok(max_regs) = manager
+                .execute_with_reconnect(|client| {
+                    Box::pin(async move {
+                        client
+                            .read_holding_registers(station_id, addr_station_max, 2)
+                            .await
+                    })
+                })
+                .await
+            {
+                if max_regs.len() >= 2 {
+                    if let Ok(max_c) = decode_32bit_float(&max_regs[0..2]) {
+                        if max_c.is_finite() && max_c > 0.0 {
+                            self.station_max_current = max_c;
+                        }
+                    }
+                }
+            }
+
+            // Decode values with safe fallbacks
+            let (l1_v, l2_v, l3_v) = match voltages {
+                Some(v) if v.len() >= 6 => (
+                    decode_32bit_float(&v[0..2]).unwrap_or(0.0),
+                    decode_32bit_float(&v[2..4]).unwrap_or(0.0),
+                    decode_32bit_float(&v[4..6]).unwrap_or(0.0),
+                ),
+                _ => (0.0, 0.0, 0.0),
+            };
+
+            let (l1_i, l2_i, l3_i) = match currents {
+                Some(v) if v.len() >= 6 => (
+                    decode_32bit_float(&v[0..2]).unwrap_or(0.0),
+                    decode_32bit_float(&v[2..4]).unwrap_or(0.0),
+                    decode_32bit_float(&v[4..6]).unwrap_or(0.0),
+                ),
+                _ => (0.0, 0.0, 0.0),
+            };
+
+            let (l1_p, l2_p, l3_p, p_total) = match power_regs {
+                Some(v) if v.len() >= 8 => (
+                    decode_32bit_float(&v[0..2]).unwrap_or(0.0) as f64,
+                    decode_32bit_float(&v[2..4]).unwrap_or(0.0) as f64,
+                    decode_32bit_float(&v[4..6]).unwrap_or(0.0) as f64,
+                    decode_32bit_float(&v[6..8]).unwrap_or(0.0) as f64,
+                ),
+                _ => (0.0, 0.0, 0.0, 0.0),
+            };
+
+            let energy_wh = match energy_regs {
+                Some(v) if v.len() >= 4 => decode_64bit_float(&v[0..4]).unwrap_or(0.0),
+                _ => 0.0,
+            };
+            let energy_kwh = energy_wh / 1000.0;
+
+            let status = match status_regs {
+                Some(v) if v.len() >= 5 => {
+                    let s = decode_string(&v[0..5], None).unwrap_or_default();
+                    Self::map_alfen_status_to_victron(&s) as i32
+                }
+                _ => 0,
+            };
+
+            // Control logic: compute effective current and write via Modbus if needed
+            let now_secs = (std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default())
+            .as_secs_f64();
+            let requested = self.intended_set_current;
+            let effective: f32 = self
+                .controls
+                .compute_effective_current(
+                    self.current_mode,
+                    self.start_stop,
+                    requested,
+                    self.station_max_current,
+                    now_secs,
+                    Some(p_total as f32),
+                    &self.config,
+                )
+                .await
+                .unwrap_or(0.0);
+
+            let need_watchdog = self.last_current_set_time.elapsed().as_secs()
+                >= self.config.controls.watchdog_interval_seconds as u64;
+            let need_change = (effective - self.last_sent_current).abs()
+                > self.config.controls.update_difference_threshold;
+            if need_watchdog || need_change {
+                let regs = crate::modbus::encode_32bit_float(effective);
+                let write_res = manager
+                    .execute_with_reconnect(|client| {
+                        let regs_vec = vec![regs[0], regs[1]];
+                        Box::pin(async move {
+                            client
+                                .write_multiple_registers(socket_id, addr_amps, &regs_vec)
+                                .await
+                        })
+                    })
+                    .await;
+                if write_res.is_ok() {
+                    self.last_sent_current = effective;
+                    self.last_current_set_time = std::time::Instant::now();
+                } else {
+                    self.logger.warn("Failed to write set current via Modbus");
+                }
+            }
+
+            // Update session manager
+            self.sessions.update(p_total, energy_kwh)?;
+
+            // Persist minimal state snapshot (best-effort)
+            self.persistence.set_mode(self.current_mode as u32);
+            self.persistence.set_start_stop(self.start_stop as u32);
+            self.persistence.set_set_current(self.intended_set_current);
+            // store session snapshot
+            let _ = self
+                .persistence
+                .set_section("session", self.sessions.get_session_stats());
+            let _ = self.persistence.save();
+
+            // D-Bus metrics (stubbed store)
+            if let Some(dbus) = &mut self.dbus {
+                let mut updates = Vec::with_capacity(16);
+                updates.push(("/Ac/L1/Voltage".to_string(), serde_json::json!(l1_v)));
+                updates.push(("/Ac/L2/Voltage".to_string(), serde_json::json!(l2_v)));
+                updates.push(("/Ac/L3/Voltage".to_string(), serde_json::json!(l3_v)));
+                updates.push(("/Ac/L1/Current".to_string(), serde_json::json!(l1_i)));
+                updates.push(("/Ac/L2/Current".to_string(), serde_json::json!(l2_i)));
+                updates.push(("/Ac/L3/Current".to_string(), serde_json::json!(l3_i)));
+                updates.push(("/Ac/L1/Power".to_string(), serde_json::json!(l1_p)));
+                updates.push(("/Ac/L2/Power".to_string(), serde_json::json!(l2_p)));
+                updates.push(("/Ac/L3/Power".to_string(), serde_json::json!(l3_p)));
+                updates.push(("/Ac/Power".to_string(), serde_json::json!(p_total)));
+                updates.push(("/Status".to_string(), serde_json::json!(status)));
+                // Session energy forward if available
+                let stats = self.sessions.get_session_stats();
+                if let Some(val) = stats.get("energy_delivered_kwh") {
+                    updates.push(("/Ac/Energy/Forward".to_string(), val.clone()));
+                }
+                // Derived paths
+                let max_phase_current = l1_i.max(l2_i.max(l3_i));
+                updates.push((
+                    "/Ac/Current".to_string(),
+                    serde_json::json!(max_phase_current),
+                ));
+                updates.push(("/Current".to_string(), serde_json::json!(max_phase_current)));
+                let phase_count = [l1_i, l2_i, l3_i]
+                    .iter()
+                    .filter(|v| v.is_finite() && v.abs() > 0.01)
+                    .count();
+                updates.push(("/Ac/PhaseCount".to_string(), serde_json::json!(phase_count)));
+                let charging_time_sec = stats
+                    .get("session_duration_min")
+                    .and_then(|v| v.as_f64())
+                    .map(|m| (m * 60.0).round() as i64)
+                    .unwrap_or(0);
+                updates.push((
+                    "/ChargingTime".to_string(),
+                    serde_json::json!(charging_time_sec),
+                ));
+                dbus.update_paths(updates).await?;
+            }
+
+            // Log a concise summary
+            self.logger.debug(&format!(
+                "V=({:.1},{:.1},{:.1})V I=({:.2},{:.2},{:.2})A P=({:.0},{:.0},{:.0})W total={:.0}W E={:.3}kWh status={}",
+                l1_v, l2_v, l3_v, l1_i, l2_i, l3_i, l1_p, l2_p, l3_p, p_total, energy_kwh, status
+            ));
+
+            // TODO: apply control logic and write set-current via Modbus
+        }
 
         self.logger.debug("Poll cycle completed");
         Ok(())
@@ -163,5 +470,19 @@ impl AlfenDriver {
     /// Get configuration reference
     pub fn config(&self) -> &Config {
         &self.config
+    }
+}
+
+impl AlfenDriver {
+    /// Map Alfen Mode3 status string to Victron-esque numeric status
+    /// 0=Disconnected, 1=Connected, 2=Charging
+    fn map_alfen_status_to_victron(status_str: &str) -> u8 {
+        let s = status_str.trim_matches(char::from(0)).trim().to_uppercase();
+        match s.as_str() {
+            "C2" | "D2" => 2,
+            "B1" | "B2" | "C1" | "D1" => 1,
+            "A" | "E" | "F" => 0,
+            _ => 0,
+        }
     }
 }
