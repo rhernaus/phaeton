@@ -467,7 +467,7 @@ impl AlfenDriver {
                 .set_section("session", self.sessions.get_state());
             let _ = self.persistence.save();
 
-            // D-Bus metrics (stubbed store)
+            // D-Bus metrics (publish authoritative values)
             if let Some(dbus) = &mut self.dbus {
                 let mut updates = Vec::with_capacity(16);
                 updates.push(("/Ac/L1/Voltage".to_string(), serde_json::json!(l1_v)));
@@ -498,6 +498,11 @@ impl AlfenDriver {
                     serde_json::json!(max_phase_current),
                 ));
                 updates.push(("/Current".to_string(), serde_json::json!(max_phase_current)));
+                // Also publish the requested set current as authoritative value
+                updates.push((
+                    "/SetCurrent".to_string(),
+                    serde_json::json!(self.intended_set_current as f64),
+                ));
                 let phase_count = [l1_i, l2_i, l3_i]
                     .iter()
                     .filter(|v| v.is_finite() && v.abs() > 0.01)
