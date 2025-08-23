@@ -5,7 +5,9 @@
 
 use crate::config::LoggingConfig;
 use crate::error::{PhaetonError, Result};
+use once_cell::sync::OnceCell;
 use tracing::{Level, debug, error, info, trace, warn};
+use tracing_appender::non_blocking::WorkerGuard;
 use tracing_appender::{non_blocking, rolling};
 use tracing_subscriber::{EnvFilter, Layer, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -27,7 +29,10 @@ pub fn init_logging(config: &LoggingConfig) -> Result<()> {
         .build(&config.file)
         .map_err(|e| PhaetonError::io(format!("Failed to create log file appender: {}", e)))?;
 
-    let (non_blocking_appender, _guard) = non_blocking(file_appender);
+    let (non_blocking_appender, guard) = non_blocking(file_appender);
+    // Keep the guard alive for the entire process lifetime to ensure logs are written
+    static LOG_GUARD: OnceCell<WorkerGuard> = OnceCell::new();
+    let _ = LOG_GUARD.set(guard);
 
     // Create registry with multiple layers
     let registry = tracing_subscriber::registry().with(filter);
