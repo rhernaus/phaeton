@@ -5,7 +5,6 @@
 
 use crate::error::{PhaetonError, Result};
 use crate::logging::get_logger;
-use std::path::Path;
 
 /// Update status information
 #[derive(Debug, Clone)]

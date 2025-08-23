@@ -5,7 +5,6 @@
 
 use crate::config::LoggingConfig;
 use crate::error::{PhaetonError, Result};
-use std::path::Path;
 use tracing::{debug, error, info, trace, warn, Level};
 use tracing_appender::{non_blocking, rolling};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};

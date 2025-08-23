@@ -3,7 +3,7 @@
 //! This module provides D-Bus service integration to expose the charger
 //! as a standard Victron device on Venus OS.
 
-use crate::error::{PhaetonError, Result};
+use crate::error::Result;
 use crate::logging::get_logger;
 
 /// D-Bus service manager

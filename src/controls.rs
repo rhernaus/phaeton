@@ -3,7 +3,7 @@
 //! This module contains the business logic for different charging modes
 //! including manual, automatic, and scheduled charging strategies.
 
-use crate::error::{PhaetonError, Result};
+use crate::error::Result;
 use crate::logging::get_logger;
 
 /// Charging mode enumeration

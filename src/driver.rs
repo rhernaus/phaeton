@@ -4,7 +4,7 @@
 //! that coordinates all the different components of the system.
 
 use crate::config::Config;
-use crate::error::{PhaetonError, Result};
+use crate::error::Result;
 use crate::logging::{get_logger, LogContext};
 use crate::modbus::ModbusConnectionManager;
 use tokio::sync::{mpsc, watch};

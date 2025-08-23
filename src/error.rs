@@ -3,7 +3,6 @@
 //! This module defines the error types used throughout the application,
 //! providing consistent error handling and reporting.
 
-use std::fmt;
 use thiserror::Error;
 
 /// Result type alias for Phaeton operations

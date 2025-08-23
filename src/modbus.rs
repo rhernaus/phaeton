@@ -4,7 +4,7 @@
 //! handling both socket slave (real-time data) and station slave (configuration)
 //! operations with proper error handling and connection management.
 
-use crate::config::{Config, ModbusConfig};
+use crate::config::ModbusConfig;
 use crate::error::{PhaetonError, Result};
 use crate::logging::get_logger;
 use std::time::Duration;

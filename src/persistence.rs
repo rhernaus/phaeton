@@ -3,7 +3,7 @@
 //! This module handles saving and loading persistent state including
 //! configuration changes and driver state across restarts.
 
-use crate::error::{PhaetonError, Result};
+use crate::error::Result;
 use crate::logging::get_logger;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
