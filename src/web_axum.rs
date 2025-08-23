@@ -308,12 +308,10 @@ async fn events(State(state): State<AppState>) -> impl IntoResponse {
 )]
 pub struct ApiDoc;
 
-pub async fn serve(driver: Arc<Mutex<AlfenDriver>>, host: &str, port: u16) -> anyhow::Result<()> {
-    let state = AppState { driver };
-
+pub fn build_router(state: AppState) -> Router {
     let openapi = ApiDoc::openapi();
 
-    let router = Router::new()
+    Router::new()
         .route("/api/health", get(health))
         .route("/api/status", get(status))
         .route("/api/mode", post(set_mode))
@@ -331,14 +329,24 @@ pub async fn serve(driver: Arc<Mutex<AlfenDriver>>, host: &str, port: u16) -> an
         .route("/api/update/apply", post(update_apply))
         .route("/api/events", get(events))
         .nest_service(
+            "/ui",
+            get_service(ServeDir::new("./webui"))
+                .handle_error(|_| async { StatusCode::INTERNAL_SERVER_ERROR }),
+        )
+        .nest_service(
             "/app",
             get_service(ServeDir::new("./webui"))
                 .handle_error(|_| async { StatusCode::INTERNAL_SERVER_ERROR }),
         )
-        .merge(SwaggerUi::new("/ui/openapi").url("/openapi.json", openapi))
+        .merge(SwaggerUi::new("/docs").url("/openapi.json", openapi))
         .with_state(state)
         .layer(CorsLayer::permissive())
-        .layer(TraceLayer::new_for_http());
+        .layer(TraceLayer::new_for_http())
+}
+
+pub async fn serve(driver: Arc<Mutex<AlfenDriver>>, host: &str, port: u16) -> anyhow::Result<()> {
+    let state = AppState { driver };
+    let router = build_router(state);
 
     let addr: SocketAddr = match host.parse::<IpAddr>() {
         Ok(ip) => SocketAddr::new(ip, port),

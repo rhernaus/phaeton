@@ -395,7 +395,7 @@ impl ModbusConnectionManager {
     }
 
     /// Check if an error is a connection-related error
-    fn is_connection_error(error: &PhaetonError) -> bool {
+    pub(crate) fn is_connection_error(error: &PhaetonError) -> bool {
         match error {
             PhaetonError::Modbus { message: msg } => {
                 msg.contains("connection")

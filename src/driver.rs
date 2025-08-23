@@ -661,7 +661,7 @@ impl AlfenDriver {
 
     /// Map Alfen Mode3 status string to Victron-esque numeric status
     /// 0=Disconnected, 1=Connected, 2=Charging
-    fn map_alfen_status_to_victron(status_str: &str) -> u8 {
+    pub(crate) fn map_alfen_status_to_victron(status_str: &str) -> u8 {
         let s = status_str.trim_matches(char::from(0)).trim().to_uppercase();
         match s.as_str() {
             "C2" | "D2" => 2,

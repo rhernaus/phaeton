@@ -144,3 +144,16 @@ impl ChargingControls {
         h * 60 + m
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_hhmm() {
+        assert_eq!(ChargingControls::parse_hhmm("08:30"), 8 * 60 + 30);
+        assert_eq!(ChargingControls::parse_hhmm("23:59"), 23 * 60 + 59);
+        assert_eq!(ChargingControls::parse_hhmm("24:00"), 0);
+        assert_eq!(ChargingControls::parse_hhmm("bad"), 0);
+    }
+}
