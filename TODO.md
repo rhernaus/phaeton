@@ -10,6 +10,7 @@ This project is a complete rewrite of the Python Alfen EV charger driver in Rust
 - **Code Quality**: Clippy clean with zero warnings ✅
 - **Build/cross**: Cross-compilation profiles present for ARMv7 and AArch64 ✅
 - **CI/CD**: GitHub Actions configured (tests, audit, builds, cross artifacts)
+- **Dependencies**: Upgraded `tokio-modbus` to 0.16.1; API adapted ✅
 
 ## Project Structure
 ```
@@ -99,6 +100,7 @@ phaeton/
 - [x] **Create error handling** for Modbus-specific errors - Comprehensive error handling
 - [x] **Implement timeout handling** for all operations
 - [x] **Add connection pooling** for performance optimization - Connection manager ready
+- [x] **Upgrade tokio-modbus to 0.16.1** and adopt nested `Result` handling
 
 ## 2.2 Core Driver Logic
 - [x] **Implement main driver state machine** with `tokio::sync::mpsc` (command channel scaffold)
@@ -145,7 +147,9 @@ phaeton/
   - `POST /api/mode` - Mode switching
   - `POST /api/startstop` - Start/stop charging
   - `POST /api/set_current` - Current adjustment
-- [ ] **Add remaining endpoints** for config, updates, logs, schema
+  - `GET /api/config` - Get configuration
+  - `PUT /api/config` - Update configuration
+- [ ] **Add remaining endpoints** for updates, logs, schema
 - [ ] **Serve static UI** under `/ui` (web assets)
 - [ ] **Implement real-time updates** via SSE or WebSocket
 - [ ] **Add CORS middleware** for local development

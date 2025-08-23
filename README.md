@@ -16,7 +16,7 @@ A high-performance Rust implementation of the Alfen EV charger driver for Victro
 
 ## Status
 
-🚧 **Work in Progress**: This is a rewrite of the Python [victron-alfen-charger](https://github.com/your-org/victron-alfen-charger) project in Rust. Currently in Phase 2 (Core communication & control) – polling, MANUAL/AUTO/SCHEDULED control logic, session tracking + persistence, and D‑Bus via `zbus` (service registered; cached paths for now) are implemented. A basic web API is available (status + control), and the driver spawns the web server. CI builds and cross-compiles are configured.
+🚧 **Work in Progress**: This is a rewrite of the Python [victron-alfen-charger](https://github.com/your-org/victron-alfen-charger) project in Rust. Currently in Phase 2 (Core communication & control) – polling, MANUAL/AUTO/SCHEDULED control logic, session tracking + persistence, and D‑Bus via `zbus` (service registered; cached paths for now) are implemented. A basic web API is available (status + control + config get/update), and the driver spawns the web server. CI builds and cross-compiles are configured. Modbus stack upgraded to `tokio-modbus` 0.16.1.
 
 ## Quick Start
 
@@ -175,6 +175,8 @@ The application follows a modular architecture with clear separation of concerns
 - `POST /api/mode` - Change charging mode
 - `POST /api/startstop` - Start/stop charging
 - `POST /api/set_current` - Set charging current
+ - `GET /api/config` - Get configuration
+ - `PUT /api/config` - Update configuration
 
 ### Planned Endpoints
 
