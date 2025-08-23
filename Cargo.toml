@@ -59,7 +59,7 @@ once_cell = "1.19"
 # File system and persistence
 # tokio-fs is now part of tokio
 fs-err = "2.9"
-directories = "5.0"
+directories = "6.0"
 
 # Git operations for self-updates
 # Use vendored libgit2 and OpenSSL to avoid needing system -dev packages in CI/cross builds
