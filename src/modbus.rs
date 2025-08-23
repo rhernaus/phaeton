@@ -111,14 +111,24 @@ impl ModbusClient {
         let request = client.read_holding_registers(address, count);
 
         match timeout(timeout_duration, request).await {
-            Ok(Ok(response)) => {
-                self.logger.trace(&format!(
-                    "Read {} registers: {:?}",
-                    response.len(),
-                    response
-                ));
-                Ok(response)
-            }
+            Ok(Ok(inner)) => match inner {
+                Ok(response) => {
+                    self.logger.trace(&format!(
+                        "Read {} registers: {:?}",
+                        response.len(),
+                        response
+                    ));
+                    Ok(response)
+                }
+                Err(exc) => {
+                    let error_msg = format!(
+                        "Modbus exception while reading holding registers: {:?}",
+                        exc
+                    );
+                    self.logger.error(&error_msg);
+                    Err(PhaetonError::modbus(error_msg))
+                }
+            },
             Ok(Err(e)) => {
                 let error_msg = format!("Failed to read holding registers: {}", e);
                 self.logger.error(&error_msg);
@@ -152,10 +162,18 @@ impl ModbusClient {
         let request = client.write_single_register(address, value);
 
         match timeout(timeout_duration, request).await {
-            Ok(Ok(_)) => {
-                self.logger.debug("Successfully wrote single register");
-                Ok(())
-            }
+            Ok(Ok(inner)) => match inner {
+                Ok(()) => {
+                    self.logger.debug("Successfully wrote single register");
+                    Ok(())
+                }
+                Err(exc) => {
+                    let error_msg =
+                        format!("Modbus exception while writing single register: {:?}", exc);
+                    self.logger.error(&error_msg);
+                    Err(PhaetonError::modbus(error_msg))
+                }
+            },
             Ok(Err(e)) => {
                 let error_msg = format!("Failed to write single register: {}", e);
                 self.logger.error(&error_msg);
@@ -191,10 +209,20 @@ impl ModbusClient {
         let request = client.write_multiple_registers(address, values);
 
         match timeout(timeout_duration, request).await {
-            Ok(Ok(_)) => {
-                self.logger.debug("Successfully wrote multiple registers");
-                Ok(())
-            }
+            Ok(Ok(inner)) => match inner {
+                Ok(()) => {
+                    self.logger.debug("Successfully wrote multiple registers");
+                    Ok(())
+                }
+                Err(exc) => {
+                    let error_msg = format!(
+                        "Modbus exception while writing multiple registers: {:?}",
+                        exc
+                    );
+                    self.logger.error(&error_msg);
+                    Err(PhaetonError::modbus(error_msg))
+                }
+            },
             Ok(Err(e)) => {
                 let error_msg = format!("Failed to write multiple registers: {}", e);
                 self.logger.error(&error_msg);
