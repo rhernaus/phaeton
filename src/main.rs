@@ -8,10 +8,10 @@ use tracing::{error, info};
 #[tokio::main]
 async fn main() -> Result<()> {
     // Create driver command channel
-    let (_cmd_tx, cmd_rx) = mpsc::unbounded_channel::<DriverCommand>();
+    let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<DriverCommand>();
 
     // Initialize the driver with command receiver
-    let driver = AlfenDriver::new(cmd_rx)
+    let driver = AlfenDriver::new(cmd_rx, cmd_tx.clone())
         .await
         .map_err(|e| anyhow::anyhow!("Failed to create driver: {}", e))?;
 

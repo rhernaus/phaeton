@@ -81,11 +81,17 @@ pub struct AlfenDriver {
 
     /// Command receiver for external control
     commands_rx: mpsc::UnboundedReceiver<DriverCommand>,
+
+    /// Command sender (fan-out to subsystems like D-Bus, web if needed)
+    commands_tx: mpsc::UnboundedSender<DriverCommand>,
 }
 
 impl AlfenDriver {
     /// Create a new driver instance
-    pub async fn new(commands_rx: mpsc::UnboundedReceiver<DriverCommand>) -> Result<Self> {
+    pub async fn new(
+        commands_rx: mpsc::UnboundedReceiver<DriverCommand>,
+        commands_tx: mpsc::UnboundedSender<DriverCommand>,
+    ) -> Result<Self> {
         let config = Config::load().map_err(|e| {
             eprintln!("Failed to load configuration: {}", e);
             e
@@ -156,6 +162,7 @@ impl AlfenDriver {
             last_current_set_time: std::time::Instant::now(),
             last_status: 0,
             commands_rx,
+            commands_tx,
         })
     }
 
@@ -170,7 +177,8 @@ impl AlfenDriver {
         self.state.send(DriverState::Running).ok();
 
         // Initialize D-Bus service (stub) and start
-        let mut dbus = DbusService::new(self.config.device_instance).await?;
+        let mut dbus =
+            DbusService::new(self.config.device_instance, self.commands_tx.clone()).await?;
         dbus.start().await?;
         self.dbus = Some(dbus);
 
@@ -459,7 +467,7 @@ impl AlfenDriver {
                 .set_section("session", self.sessions.get_state());
             let _ = self.persistence.save();
 
-            // D-Bus metrics (stubbed store)
+            // D-Bus metrics (publish authoritative values)
             if let Some(dbus) = &mut self.dbus {
                 let mut updates = Vec::with_capacity(16);
                 updates.push(("/Ac/L1/Voltage".to_string(), serde_json::json!(l1_v)));
@@ -490,6 +498,11 @@ impl AlfenDriver {
                     serde_json::json!(max_phase_current),
                 ));
                 updates.push(("/Current".to_string(), serde_json::json!(max_phase_current)));
+                // Also publish the requested set current as authoritative value
+                updates.push((
+                    "/SetCurrent".to_string(),
+                    serde_json::json!(self.intended_set_current as f64),
+                ));
                 let phase_count = [l1_i, l2_i, l3_i]
                     .iter()
                     .filter(|v| v.is_finite() && v.abs() > 0.01)
@@ -546,6 +559,13 @@ impl AlfenDriver {
     /// Get configuration reference
     pub fn config(&self) -> &Config {
         &self.config
+    }
+
+    /// Update configuration safely (no hot-restart of subsystems yet)
+    pub fn update_config(&mut self, new_config: Config) -> Result<()> {
+        // Basic validation already expected by caller
+        self.config = new_config;
+        Ok(())
     }
 
     /// Accessors for web/UI

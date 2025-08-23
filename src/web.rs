@@ -32,6 +32,11 @@ struct SetCurrentBody {
     amps: f32,
 }
 
+#[derive(Debug, Deserialize)]
+struct UpdateConfigBody {
+    config: serde_json::Value,
+}
+
 impl WebServer {
     /// Create a new web server
     pub async fn new(driver: Arc<Mutex<AlfenDriver>>) -> Result<Self> {
@@ -68,10 +73,23 @@ impl WebServer {
 
         let index = warp::path::end().map(|| "Phaeton Alfen EV Charger Driver");
 
+        let get_config = warp::path!("api" / "config")
+            .and(warp::get())
+            .and(with_driver(driver.clone()))
+            .and_then(handle_get_config);
+
+        let put_config = warp::path!("api" / "config")
+            .and(warp::put())
+            .and(with_driver(driver.clone()))
+            .and(warp::body::json())
+            .and_then(handle_put_config);
+
         status
             .or(post_mode)
             .or(post_startstop)
             .or(post_set_current)
+            .or(get_config)
+            .or(put_config)
             .or(index)
     }
 
@@ -140,5 +158,44 @@ async fn handle_set_current(
 ) -> std::result::Result<impl Reply, Rejection> {
     let mut drv = driver.lock().await;
     drv.set_intended_current(body.amps).await;
+    Ok(warp::reply::with_status("OK", warp::http::StatusCode::OK))
+}
+
+async fn handle_get_config(
+    driver: Arc<Mutex<AlfenDriver>>,
+) -> std::result::Result<impl Reply, Rejection> {
+    let drv = driver.lock().await;
+    let cfg = drv.config().clone();
+    let json = serde_json::to_value(cfg).unwrap_or(serde_json::json!({"error": "serialization"}));
+    Ok(warp::reply::json(&json))
+}
+
+async fn handle_put_config(
+    driver: Arc<Mutex<AlfenDriver>>,
+    body: UpdateConfigBody,
+) -> std::result::Result<impl Reply, Rejection> {
+    let mut drv = driver.lock().await;
+    let new_cfg: crate::config::Config = match serde_json::from_value(body.config.clone()) {
+        Ok(c) => c,
+        Err(_) => {
+            return Ok(warp::reply::with_status(
+                "Bad Request",
+                warp::http::StatusCode::BAD_REQUEST,
+            ));
+        }
+    };
+    if new_cfg.validate().is_err() {
+        return Ok(warp::reply::with_status(
+            "Invalid config",
+            warp::http::StatusCode::BAD_REQUEST,
+        ));
+    }
+    // Apply update
+    if drv.update_config(new_cfg).is_err() {
+        return Ok(warp::reply::with_status(
+            "Failed to apply config",
+            warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+        ));
+    }
     Ok(warp::reply::with_status("OK", warp::http::StatusCode::OK))
 }
