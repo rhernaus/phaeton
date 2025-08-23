@@ -17,7 +17,7 @@ tokio-util = "0.7"
 tokio-stream = "0.1"
 
 # Modbus TCP client
-tokio-modbus = { version = "0.9", features = ["tcp"] }
+tokio-modbus = { version = "0.16", features = ["tcp"] }
 
 # Web framework - using warp for now as it's more stable
 warp = "0.4"
