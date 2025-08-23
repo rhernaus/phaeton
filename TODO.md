@@ -23,7 +23,7 @@ phaeton/
 │   ├── modbus.rs          # Modbus TCP client
 │   ├── driver.rs          # Core driver logic
 │   ├── dbus.rs            # D-Bus integration
-│   ├── web.rs             # HTTP server and API
+│   ├── web_axum.rs        # HTTP server and API (Axum + OpenAPI)
 │   ├── persistence.rs     # State persistence
 │   ├── session.rs         # Charging session management
 │   ├── controls.rs        # Charging control algorithms
@@ -46,7 +46,7 @@ phaeton/
 - [x] **Configure Cargo.toml** with all necessary dependencies:
   - Async runtime (`tokio`, `tokio-util`, `tokio-stream`) ✅
   - Modbus client (`tokio-modbus`) ✅
-  - Web framework (`warp`) ✅
+  - Web framework (`axum`) ✅
   - Serialization (`serde`, `serde_yaml`, `serde_json`) ✅
   - Logging (`tracing`, `tracing-subscriber`, `tracing-appender`) ✅
   - Configuration (`config`) ✅
@@ -80,7 +80,7 @@ phaeton/
 - [x] **Implement structured logging** using `tracing`
 - [x] **Configure multiple output formats** (JSON, human-readable)
 - [x] **Set up log rotation** and file management - Using tracing-appender
-- [ ] **Implement log streaming** for web UI integration (SSE/WebSocket)
+- [x] **Implement log streaming** for web UI integration via SSE (`/api/events`)
 - [x] **Add performance tracing** for Modbus operations and control loops
 - [x] **Create log context** system for request tracing
 
@@ -141,7 +141,7 @@ phaeton/
 - [ ] **Implement Victron energy rate detection** from system D-Bus
 
 ## 3.2 Web Server & API
-- [ ] **Decide web framework**: keep `warp` (current) or migrate to `axum`
+- [x] **Migrate web framework**: fully migrated from `warp` to `axum` (no legacy code)
 - [x] **Create REST API endpoints** (initial set):
   - `GET /api/status` - Current system status
   - `POST /api/mode` - Mode switching
@@ -149,11 +149,11 @@ phaeton/
   - `POST /api/set_current` - Current adjustment
   - `GET /api/config` - Get configuration
   - `PUT /api/config` - Update configuration
-- [ ] **Add remaining endpoints** for updates, logs, schema
-- [ ] **Serve static UI** under `/ui` (web assets)
-- [ ] **Implement real-time updates** via SSE or WebSocket
-- [ ] **Add CORS middleware** for local development
-- [ ] **Create API documentation** with OpenAPI/Swagger
+- [x] **Add remaining endpoints** for updates, logs, schema
+- [x] **Serve static UI** under `/ui` (alias `/app`) (web assets)
+- [x] **Implement real-time updates** via SSE (`GET /api/events`)
+- [x] **Add CORS middleware** for local development
+- [x] **Create API documentation** with OpenAPI/Swagger (OpenAPI at `/openapi.json`, Swagger UI at `/docs`)
 
 ---
 
@@ -277,4 +277,4 @@ phaeton/
 14. ✅ Vendor `git2`/OpenSSL to simplify cross-compilation
 
 ## Next Phase Ready
-**Phase 3: System Integration** - D‑Bus name acquisition complete; next is exporting real properties and wiring more web endpoints. SSE/WebSocket streaming and proper config/update APIs to follow.
+**Phase 3: System Integration** - D‑Bus name acquisition complete; next is exporting real properties and wiring more web endpoints. SSE/OpenAPI/Swagger in place; continue with richer D‑Bus and pricing integrations.

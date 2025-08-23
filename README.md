@@ -8,7 +8,7 @@ A high-performance Rust implementation of the Alfen EV charger driver for Victro
 - **Memory Safe**: Rust's ownership system prevents common bugs
 - **Modbus TCP**: Direct communication with Alfen EV chargers
 - **D-Bus Integration**: Full Venus OS compatibility
-- **Web Interface**: REST API and static file serving
+- **Web Interface**: REST API and static file serving (Axum)
 - **Dynamic Pricing**: Tibber API integration for smart charging
 - **Vehicle Integration**: Tesla and Kia API support
 - **Self-Updates**: Git-based automatic updates
@@ -16,7 +16,7 @@ A high-performance Rust implementation of the Alfen EV charger driver for Victro
 
 ## Status
 
-🚧 **Work in Progress**: This is a rewrite of the Python [victron-alfen-charger](https://github.com/your-org/victron-alfen-charger) project in Rust. Currently in Phase 2 (Core communication & control) – polling, MANUAL/AUTO/SCHEDULED control logic, session tracking + persistence, and D‑Bus via `zbus` (service registered; cached paths for now) are implemented. A basic web API is available (status + control + config get/update), and the driver spawns the web server. CI builds and cross-compiles are configured. Modbus stack upgraded to `tokio-modbus` 0.16.1.
+🚧 **Work in Progress**: This is a rewrite of the Python [victron-alfen-charger](https://github.com/your-org/victron-alfen-charger) project in Rust. Currently in Phase 2 (Core communication & control) – polling, MANUAL/AUTO/SCHEDULED control logic, session tracking + persistence, and D‑Bus via `zbus` (service registered; cached paths for now) are implemented. A web API powered by Axum is available (status + control + config get/update, logs, updates, SSE), and OpenAPI docs are exposed. CI builds and cross-compiles are configured. Modbus stack upgraded to `tokio-modbus` 0.16.1.
 
 ## Quick Start
 
@@ -193,7 +193,7 @@ The application follows a modular architecture with clear separation of concerns
 - `modbus`: Modbus TCP client for charger communication
 - `driver`: Core driver logic and state management
 - `dbus`: D-Bus integration for Venus OS
-- `web`: HTTP server and REST API
+- `web_axum`: HTTP server and REST API (Axum + OpenAPI)
 - `persistence`: State persistence and recovery
 - `session`: Charging session management
 - `controls`: Charging control algorithms
@@ -205,24 +205,32 @@ The application follows a modular architecture with clear separation of concerns
 
 ### REST API Endpoints (available)
 
+- `GET /api/health` - Health check
 - `GET /api/status` - Current system status
 - `POST /api/mode` - Change charging mode
 - `POST /api/startstop` - Start/stop charging
 - `POST /api/set_current` - Set charging current
- - `GET /api/config` - Get configuration
- - `PUT /api/config` - Update configuration
-
-### Planned Endpoints
-
 - `GET /api/config` - Get configuration
 - `PUT /api/config` - Update configuration
 - `GET /api/config/schema` - Configuration schema
-- Update management endpoints (`/api/update/*`)
-- Logs endpoints (`/api/logs/*`)
+- `GET /api/logs/head` - Head of log
+- `GET /api/logs/tail` - Tail of log
+- `GET /api/logs/download` - Download full log
+- `GET /api/sessions` - Sessions snapshot
+- `GET /api/dbus` - Cached D‑Bus values
+- `GET /api/update/status` - Update status
+- `POST /api/update/check` - Check for updates
+- `POST /api/update/apply` - Apply updates
+- `GET /api/events` - Server-Sent Events (live status)
 
-### WebSocket/SSE Support (planned)
+### OpenAPI / Swagger
 
-Real-time updates via WebSocket or Server-Sent Events for live monitoring.
+- OpenAPI JSON: `/openapi.json`
+- Swagger UI: `/docs`
+
+### Static Web UI
+
+- UI assets are served under `/ui` (and `/app` as an alias for compatibility)
 
 ## Configuration
 

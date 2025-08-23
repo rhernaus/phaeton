@@ -86,6 +86,13 @@ impl PhaetonError {
         }
     }
 
+    /// Create a new web error
+    pub fn web<S: Into<String>>(message: S) -> Self {
+        PhaetonError::Web {
+            message: message.into(),
+        }
+    }
+
     /// Create a new validation error
     pub fn validation<S: Into<String>>(field: S, message: S) -> Self {
         PhaetonError::Validation {
@@ -129,9 +136,9 @@ impl PhaetonError {
         }
     }
 
-    /// Create a new web error
-    pub fn web<S: Into<String>>(message: S) -> Self {
-        PhaetonError::Web {
+    /// Create a new auth error
+    pub fn auth<S: Into<String>>(message: S) -> Self {
+        PhaetonError::Auth {
             message: message.into(),
         }
     }
