@@ -81,11 +81,17 @@ pub struct AlfenDriver {
 
     /// Command receiver for external control
     commands_rx: mpsc::UnboundedReceiver<DriverCommand>,
+
+    /// Command sender (fan-out to subsystems like D-Bus, web if needed)
+    commands_tx: mpsc::UnboundedSender<DriverCommand>,
 }
 
 impl AlfenDriver {
     /// Create a new driver instance
-    pub async fn new(commands_rx: mpsc::UnboundedReceiver<DriverCommand>) -> Result<Self> {
+    pub async fn new(
+        commands_rx: mpsc::UnboundedReceiver<DriverCommand>,
+        commands_tx: mpsc::UnboundedSender<DriverCommand>,
+    ) -> Result<Self> {
         let config = Config::load().map_err(|e| {
             eprintln!("Failed to load configuration: {}", e);
             e
@@ -156,6 +162,7 @@ impl AlfenDriver {
             last_current_set_time: std::time::Instant::now(),
             last_status: 0,
             commands_rx,
+            commands_tx,
         })
     }
 
@@ -170,7 +177,8 @@ impl AlfenDriver {
         self.state.send(DriverState::Running).ok();
 
         // Initialize D-Bus service (stub) and start
-        let mut dbus = DbusService::new(self.config.device_instance).await?;
+        let mut dbus =
+            DbusService::new(self.config.device_instance, self.commands_tx.clone()).await?;
         dbus.start().await?;
         self.dbus = Some(dbus);
 
