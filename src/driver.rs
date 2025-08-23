@@ -614,6 +614,35 @@ impl AlfenDriver {
         self.dbus.as_ref().and_then(|d| d.get(path)).cloned()
     }
 
+    /// Snapshot of cached D-Bus paths (subset of known keys)
+    pub fn get_dbus_cache_snapshot(&self) -> serde_json::Value {
+        let mut root = serde_json::Map::new();
+        for key in [
+            "/DeviceInstance",
+            "/ProductName",
+            "/FirmwareVersion",
+            "/Serial",
+            "/Ac/Power",
+            "/Ac/Energy/Forward",
+            "/Ac/Current",
+            "/Ac/PhaseCount",
+            "/Status",
+            "/Mode",
+            "/StartStop",
+            "/SetCurrent",
+        ] {
+            if let Some(v) = self.get_db_value(key) {
+                root.insert(key.to_string(), v);
+            }
+        }
+        serde_json::Value::Object(root)
+    }
+
+    /// Get sessions data
+    pub fn sessions_snapshot(&self) -> serde_json::Value {
+        self.sessions.get_state()
+    }
+
     /// Subscribe to status updates (for SSE)
     pub fn subscribe_status(&self) -> broadcast::Receiver<String> {
         self.status_tx.subscribe()

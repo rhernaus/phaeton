@@ -5,9 +5,10 @@
 
 use crate::error::{PhaetonError, Result};
 use crate::logging::get_logger;
+use serde::{Deserialize, Serialize};
 
 /// Update status information
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateStatus {
     pub current_version: String,
     pub latest_version: Option<String>,

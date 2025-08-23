@@ -4,12 +4,13 @@
 //! configuration from YAML files with support for environment variable overrides.
 
 use crate::error::{PhaetonError, Result};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
 /// Main configuration structure
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Config {
     /// Modbus TCP connection configuration
     pub modbus: ModbusConfig,
@@ -47,15 +48,19 @@ pub struct Config {
     /// Timezone for schedule operations
     pub timezone: String,
 
-    /// Vehicle integrations (optional)
+    /// Vehicle integrations (optional) - omitted from JSON schema
+    #[serde(skip)]
+    #[schemars(skip)]
     pub vehicle: Option<HashMap<String, serde_yaml::Value>>,
 
-    /// Multiple vehicle configurations
+    /// Multiple vehicle configurations - omitted from JSON schema
+    #[serde(skip)]
+    #[schemars(skip)]
     pub vehicles: Option<HashMap<String, serde_yaml::Value>>,
 }
 
 /// Modbus TCP connection parameters
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ModbusConfig {
     /// IP address of the Alfen charger
     pub ip: String,
@@ -71,7 +76,7 @@ pub struct ModbusConfig {
 }
 
 /// Modbus register address mappings
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct RegistersConfig {
     /// Voltage register addresses (L1, L2, L3)
     pub voltages: u16,
@@ -118,7 +123,7 @@ pub struct RegistersConfig {
 }
 
 /// Default operational values
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DefaultsConfig {
     /// Default charging current in amperes
     pub intended_set_current: f32,
@@ -128,7 +133,7 @@ pub struct DefaultsConfig {
 }
 
 /// Logging configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct LoggingConfig {
     /// Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
     pub level: String,
@@ -153,7 +158,7 @@ pub struct LoggingConfig {
 }
 
 /// Individual schedule configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ScheduleItem {
     /// Whether this schedule is active
     pub active: bool,
@@ -175,14 +180,14 @@ pub struct ScheduleItem {
 }
 
 /// Schedule configuration container
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, JsonSchema)]
 pub struct ScheduleConfig {
     /// List of schedule items
     pub items: Vec<ScheduleItem>,
 }
 
 /// Tibber API configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct TibberConfig {
     /// Tibber API access token
     pub access_token: String,
@@ -210,7 +215,7 @@ pub struct TibberConfig {
 }
 
 /// Control and safety limits
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ControlsConfig {
     /// Tolerance for current verification
     pub current_tolerance: f32,
@@ -244,7 +249,7 @@ pub struct ControlsConfig {
 }
 
 /// Web server configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WebConfig {
     /// Bind address
     pub host: String,
@@ -254,7 +259,7 @@ pub struct WebConfig {
 }
 
 /// Pricing configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct PricingConfig {
     /// Source (victron or static)
     pub source: String,
