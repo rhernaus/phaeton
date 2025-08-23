@@ -79,12 +79,14 @@ jobs:
             gcc_triplet: arm-linux-gnueabihf-gcc
             pkgconfig: /usr/lib/arm-linux-gnueabihf/pkgconfig
             friendly: Cerbo GX (ARM v7)
+            tool_prefix: arm-linux-gnueabihf
           - target: aarch64-unknown-linux-gnu
             apt_arch: arm64
             gcc_pkg: gcc-aarch64-linux-gnu
             gcc_triplet: aarch64-linux-gnu-gcc
             pkgconfig: /usr/lib/aarch64-linux-gnu/pkgconfig
             friendly: Linux ARM64
+            tool_prefix: aarch64-linux-gnu
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -104,14 +106,13 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
         run: |
           set -euxo pipefail
-          sudo dpkg --add-architecture ${{ matrix.apt_arch }}
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -y --no-install-recommends \
             ${{ matrix.gcc_pkg }} \
             pkg-config \
-            zlib1g-dev:${{ matrix.apt_arch }} \
-            libssl-dev:${{ matrix.apt_arch }} \
-            libssh2-1-dev:${{ matrix.apt_arch }} \
+            cmake \
+            make \
+            perl \
             ca-certificates
 
       - name: Configure cross env
@@ -119,9 +120,10 @@ jobs:
         run: |
           set -euxo pipefail
           TARGET_UC=$(echo "${{ matrix.target }}" | tr '[:lower:]-' '[:upper:]_')
-          echo "CARGO_TARGET_${TARGET_UC}_LINKER=${{ matrix.gcc_triplet }}" >> $GITHUB_ENV
+          echo "CARGO_TARGET_${TARGET_UC}_LINKER=${{ matrix.tool_prefix }}-gcc" >> $GITHUB_ENV
+          echo "CARGO_TARGET_${TARGET_UC}_AR=${{ matrix.tool_prefix }}-ar" >> $GITHUB_ENV
+          echo "CARGO_TARGET_${TARGET_UC}_RANLIB=${{ matrix.tool_prefix }}-ranlib" >> $GITHUB_ENV
           echo "PKG_CONFIG_ALLOW_CROSS=1" >> $GITHUB_ENV
-          echo "PKG_CONFIG_PATH=${{ matrix.pkgconfig }}" >> $GITHUB_ENV
 
       - name: Build (release)
         run: cargo build --target ${{ matrix.target }} --release --locked --verbose
