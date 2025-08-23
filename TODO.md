@@ -101,7 +101,7 @@ phaeton/
 - [x] **Add connection pooling** for performance optimization - Connection manager ready
 
 ## 2.2 Core Driver Logic
-- [ ] **Implement main driver state machine** with `tokio::sync::mpsc`
+- [x] **Implement main driver state machine** with `tokio::sync::mpsc` (command channel scaffold)
 - [x] **Create polling loop** for periodic data collection (voltages, currents, power, energy, status)
 - [x] **Implement charging control algorithms (initial)**:
   - Manual mode ✅
@@ -114,10 +114,10 @@ phaeton/
 - [ ] **Implement status mapping parity** (e.g., LOW_SOC, WAIT_* states)
 
 ## 2.3 Session Management
-- [ ] **Implement charging session tracking** with start/end detection
-- [ ] **Add session statistics** (duration, energy delivered, costs)
-- [ ] **Create session persistence** across restarts
-- [ ] **Implement session history** with configurable retention
+- [x] **Implement charging session tracking** with start/end detection
+- [x] **Add session statistics** (duration, energy delivered, costs)
+- [x] **Create session persistence** across restarts
+- [x] **Implement session history** with configurable retention
 - [ ] **Add session export** functionality for analysis
 
 ---
@@ -125,9 +125,9 @@ phaeton/
 # Phase 3: System Integration (Priority: High) 🚧
 
 ## 3.1 D-Bus Integration
-- [ ] **Implement D-Bus client** using `zbus` for Venus OS integration
-- [ ] **Create service registration** with proper naming conventions
-- [ ] **Implement D-Bus paths** for all required interfaces:
+- [x] **Implement D-Bus client** using `zbus` for Venus OS integration
+- [x] **Create service registration** with proper naming conventions
+- [ ] **Implement D-Bus paths** for all required interfaces (export real object tree; currently cached only):
   - `/Mode`, `/StartStop`, `/SetCurrent`
   - `/Ac/Voltage`, `/Ac/Current`, `/Ac/Power`
   - `/Ac/Energy/Forward`, `/ChargingTime`
@@ -139,18 +139,13 @@ phaeton/
 - [ ] **Implement Victron energy rate detection** from system D-Bus
 
 ## 3.2 Web Server & API
-- [ ] **Decide web framework**: keep `warp` (current) or migrate to `axum`, then implement server
-- [ ] **Create REST API endpoints** (parity with Python):
+- [ ] **Decide web framework**: keep `warp` (current) or migrate to `axum`
+- [x] **Create REST API endpoints** (initial set):
   - `GET /api/status` - Current system status
-  - `GET /api/config` - Configuration retrieval
-  - `PUT /api/config` - Configuration updates
-  - `GET /api/config/schema` - Configuration schema
   - `POST /api/mode` - Mode switching
   - `POST /api/startstop` - Start/stop charging
   - `POST /api/set_current` - Current adjustment
-  - `GET /api/update/status`, `POST /api/update/check`, `POST /api/update/apply`
-  - `GET /api/update/branches`, `POST /api/update/checkout`
-  - `GET /api/logs/recent`, `GET /api/logs/stream` (SSE) or WebSocket
+- [ ] **Add remaining endpoints** for config, updates, logs, schema
 - [ ] **Serve static UI** under `/ui` (web assets)
 - [ ] **Implement real-time updates** via SSE or WebSocket
 - [ ] **Add CORS middleware** for local development
@@ -264,7 +259,8 @@ phaeton/
 3. ✅ Implement configuration system
 4. ✅ Implement logging system
 5. ✅ Implement Modbus TCP client
-6. 🚧 Build core driver logic
+6. ✅ Build core driver logic (polling + controls + sessions + persistence)
+7. 🚧 Expose full D‑Bus paths and enrich Web API
 
 ## Additional Completed Infrastructure
 7. ✅ GitHub Actions CI/CD workflow present (tests, audit, macOS/Linux builds, cross)
@@ -277,4 +273,4 @@ phaeton/
 14. ✅ Vendor `git2`/OpenSSL to simplify cross-compilation
 
 ## Next Phase Ready
-**Phase 2: Core Communication & Control** - Ready to implement actual Modbus communication with hardware and complete the driver logic.
+**Phase 3: System Integration** - D‑Bus name acquisition complete; next is exporting real properties and wiring more web endpoints. SSE/WebSocket streaming and proper config/update APIs to follow.

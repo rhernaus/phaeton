@@ -16,7 +16,7 @@ A high-performance Rust implementation of the Alfen EV charger driver for Victro
 
 ## Status
 
-🚧 **Work in Progress**: This is a rewrite of the Python [victron-alfen-charger](https://github.com/your-org/victron-alfen-charger) project in Rust. Currently in Phase 2 (Core communication & control) – polling, initial MANUAL/AUTO/SCHEDULED control logic, persistence, and D‑Bus metrics (stub) are implemented. CI builds and cross-compiles are configured.
+🚧 **Work in Progress**: This is a rewrite of the Python [victron-alfen-charger](https://github.com/your-org/victron-alfen-charger) project in Rust. Currently in Phase 2 (Core communication & control) – polling, MANUAL/AUTO/SCHEDULED control logic, session tracking + persistence, and D‑Bus via `zbus` (service registered; cached paths for now) are implemented. A basic web API is available (status + control), and the driver spawns the web server. CI builds and cross-compiles are configured.
 
 ## Quick Start
 
@@ -36,7 +36,7 @@ cd phaeton
 # Build the project
 cargo build --release
 
-# Run the driver
+# Run the driver (spawns web server at 127.0.0.1:8088)
 cargo run
 ```
 
@@ -169,14 +169,20 @@ The application follows a modular architecture with clear separation of concerns
 
 ## API Documentation
 
-### REST API Endpoints (planned)
+### REST API Endpoints (available)
 
 - `GET /api/status` - Current system status
-- `GET /api/config` - Get configuration
-- `PUT /api/config` - Update configuration
 - `POST /api/mode` - Change charging mode
 - `POST /api/startstop` - Start/stop charging
 - `POST /api/set_current` - Set charging current
+
+### Planned Endpoints
+
+- `GET /api/config` - Get configuration
+- `PUT /api/config` - Update configuration
+- `GET /api/config/schema` - Configuration schema
+- Update management endpoints (`/api/update/*`)
+- Logs endpoints (`/api/logs/*`)
 
 ### WebSocket/SSE Support (planned)
 
