@@ -330,17 +330,17 @@ impl ModbusConnectionManager {
 
         loop {
             // Ensure we're connected
-            if !self.client.is_connected() {
-                if let Err(e) = self.client.connect().await {
-                    attempts += 1;
-                    if attempts >= self.max_retry_attempts {
-                        return Err(e);
-                    }
-                    self.logger
-                        .warn(&format!("Connection attempt {} failed: {}", attempts, e));
-                    sleep(self.retry_delay).await;
-                    continue;
+            if !self.client.is_connected()
+                && let Err(e) = self.client.connect().await
+            {
+                attempts += 1;
+                if attempts >= self.max_retry_attempts {
+                    return Err(e);
                 }
+                self.logger
+                    .warn(&format!("Connection attempt {} failed: {}", attempts, e));
+                sleep(self.retry_delay).await;
+                continue;
             }
 
             // Execute the operation

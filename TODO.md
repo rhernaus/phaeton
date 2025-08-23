@@ -102,16 +102,16 @@ phaeton/
 
 ## 2.2 Core Driver Logic
 - [ ] **Implement main driver state machine** with `tokio::sync::mpsc`
-- [ ] **Create polling loop** for periodic data collection
-- [ ] **Implement charging control algorithms**:
-  - Manual mode
-  - Auto mode with solar optimization
-  - Scheduled mode with time-based control
-- [ ] **Add state persistence** and restoration on startup
+- [x] **Create polling loop** for periodic data collection (voltages, currents, power, energy, status)
+- [x] **Implement charging control algorithms (initial)**:
+  - Manual mode ✅
+  - Auto mode (solar-based heuristic) ✅
+  - Scheduled mode (timezone-aware windows) ✅
+- [x] **Add state persistence** for mode/start/stop/set_current + session snapshot
 - [ ] **Implement watchdog mechanisms** for fault tolerance
 - [ ] **Create event system** for status changes and notifications
- - [ ] **Wire persistence and sessions** into the driver run loop
- - [ ] **Implement status mapping parity** (e.g., LOW_SOC, WAIT_* states)
+- [x] **Wire persistence and sessions** into the driver run loop
+- [ ] **Implement status mapping parity** (e.g., LOW_SOC, WAIT_* states)
 
 ## 2.3 Session Management
 - [ ] **Implement charging session tracking** with start/end detection
@@ -135,7 +135,7 @@ phaeton/
   - Per-phase metrics: `/Ac/L1|L2|L3/Voltage`, `/Ac/L1|L2|L3/Current`, `/Ac/L1|L2|L3/Power`
   - Other: `/Ac/PhaseCount`, `/Current`, `/Status`
   - Vehicle information paths: `/Vehicle/Provider`, `/Vehicle/Name`, `/Vehicle/VIN`, `/Vehicle/Soc`, `/Vehicle/Lat`, `/Vehicle/Lon`, `/Vehicle/Asleep`, `/Vehicle/Timestamp`
-- [ ] **Add callback handling** for control operations
+- [x] **Add callback handling scaffolding** for control operations (internal driver callbacks)
 - [ ] **Implement Victron energy rate detection** from system D-Bus
 
 ## 3.2 Web Server & API

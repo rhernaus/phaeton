@@ -278,14 +278,12 @@ impl AlfenDriver {
                     })
                 })
                 .await
+                && max_regs.len() >= 2
+                && let Ok(max_c) = decode_32bit_float(&max_regs[0..2])
+                && max_c.is_finite()
+                && max_c > 0.0
             {
-                if max_regs.len() >= 2 {
-                    if let Ok(max_c) = decode_32bit_float(&max_regs[0..2]) {
-                        if max_c.is_finite() && max_c > 0.0 {
-                            self.station_max_current = max_c;
-                        }
-                    }
-                }
+                self.station_max_current = max_c;
             }
 
             // Decode values with safe fallbacks
@@ -402,11 +400,16 @@ impl AlfenDriver {
                 updates.push(("/Ac/L3/Power".to_string(), serde_json::json!(l3_p)));
                 updates.push(("/Ac/Power".to_string(), serde_json::json!(p_total)));
                 updates.push(("/Status".to_string(), serde_json::json!(status)));
-                // Session energy forward if available
+                // Session energy forward: from active or last session, else 0.0
                 let stats = self.sessions.get_session_stats();
-                if let Some(val) = stats.get("energy_delivered_kwh") {
-                    updates.push(("/Ac/Energy/Forward".to_string(), val.clone()));
-                }
+                let energy_forward = stats
+                    .get("energy_delivered_kwh")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0);
+                updates.push((
+                    "/Ac/Energy/Forward".to_string(),
+                    serde_json::json!(energy_forward),
+                ));
                 // Derived paths
                 let max_phase_current = l1_i.max(l2_i.max(l3_i));
                 updates.push((
@@ -484,5 +487,48 @@ impl AlfenDriver {
             "A" | "E" | "F" => 0,
             _ => 0,
         }
+    }
+}
+
+// Control callbacks for Mode/StartStop/SetCurrent updates (stub: call these from web API later)
+impl AlfenDriver {
+    pub fn set_mode(&mut self, mode: u8) {
+        self.current_mode = match mode {
+            1 => ChargingMode::Auto,
+            2 => ChargingMode::Scheduled,
+            _ => ChargingMode::Manual,
+        };
+        if let Some(dbus) = &mut self.dbus {
+            let _ = futures::executor::block_on(dbus.update_path("/Mode", serde_json::json!(mode)));
+        }
+        self.persistence.set_mode(self.current_mode as u32);
+        let _ = self.persistence.save();
+    }
+
+    pub fn set_start_stop(&mut self, value: u8) {
+        self.start_stop = if value == 1 {
+            StartStopState::Enabled
+        } else {
+            StartStopState::Stopped
+        };
+        if let Some(dbus) = &mut self.dbus {
+            let _ = futures::executor::block_on(
+                dbus.update_path("/StartStop", serde_json::json!(value)),
+            );
+        }
+        self.persistence.set_start_stop(self.start_stop as u32);
+        let _ = self.persistence.save();
+    }
+
+    pub fn set_intended_current(&mut self, amps: f32) {
+        let clamped = amps.max(0.0).min(self.config.controls.max_set_current);
+        self.intended_set_current = clamped;
+        if let Some(dbus) = &mut self.dbus {
+            let _ = futures::executor::block_on(
+                dbus.update_path("/SetCurrent", serde_json::json!(clamped)),
+            );
+        }
+        self.persistence.set_set_current(self.intended_set_current);
+        let _ = self.persistence.save();
     }
 }

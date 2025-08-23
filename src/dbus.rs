@@ -31,6 +31,19 @@ impl DbusService {
     /// Start the D-Bus service
     pub async fn start(&mut self) -> Result<()> {
         self.logger.info("Starting D-Bus service (stub)");
+        // Initialize common paths with defaults
+        self.paths.insert(
+            "/ProductName".to_string(),
+            serde_json::json!("Alfen EV Charger"),
+        );
+        self.paths
+            .insert("/FirmwareVersion".to_string(), serde_json::json!("Unknown"));
+        self.paths
+            .insert("/Serial".to_string(), serde_json::json!("Unknown"));
+        self.paths
+            .insert("/Ac/Energy/Forward".to_string(), serde_json::json!(0.0));
+        self.paths
+            .insert("/Ac/PhaseCount".to_string(), serde_json::json!(0));
         Ok(())
     }
 
