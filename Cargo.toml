@@ -63,7 +63,7 @@ directories = "6.0"
 
 # Git operations for self-updates
 # Use vendored libgit2 and OpenSSL to avoid needing system -dev packages in CI/cross builds
-git2 = { version = "0.18", default-features = false, features = ["vendored-libgit2", "vendored-openssl"] }
+git2 = { version = "0.20", default-features = false, features = ["vendored-libgit2", "vendored-openssl"] }
 
 # Environment and process management
 dotenvy = "0.15"
