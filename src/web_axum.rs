@@ -10,7 +10,7 @@ use axum::{
     routing::{get, get_service, post},
 };
 use serde::Deserialize;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio_stream::StreamExt;
@@ -97,8 +97,12 @@ async fn set_current(
 #[utoipa::path(get, path = "/api/config", responses((status = 200)))]
 async fn get_config(State(state): State<AppState>) -> impl IntoResponse {
     let drv = state.driver.lock().await;
-    let json = serde_json::to_value(drv.config().clone())
+    let mut json = serde_json::to_value(drv.config().clone())
         .unwrap_or(serde_json::json!({"error":"serialization"}));
+    if let Some(obj) = json.as_object_mut() {
+        obj.remove("vehicle");
+        obj.remove("vehicles");
+    }
     Json(json)
 }
 
@@ -327,7 +331,7 @@ pub async fn serve(driver: Arc<Mutex<AlfenDriver>>, host: &str, port: u16) -> an
         .route("/api/update/apply", post(update_apply))
         .route("/api/events", get(events))
         .nest_service(
-            "/ui",
+            "/app",
             get_service(ServeDir::new("./webui"))
                 .handle_error(|_| async { StatusCode::INTERNAL_SERVER_ERROR }),
         )
@@ -336,9 +340,10 @@ pub async fn serve(driver: Arc<Mutex<AlfenDriver>>, host: &str, port: u16) -> an
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http());
 
-    let addr: SocketAddr = format!("{}:{}", host, port)
-        .parse()
-        .unwrap_or(([127, 0, 0, 1], port).into());
+    let addr: SocketAddr = match host.parse::<IpAddr>() {
+        Ok(ip) => SocketAddr::new(ip, port),
+        Err(_) => ([127, 0, 0, 1], port).into(),
+    };
     axum::serve(tokio::net::TcpListener::bind(addr).await?, router).await?;
     Ok(())
 }
