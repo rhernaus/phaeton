@@ -20,7 +20,7 @@ tokio-stream = "0.1"
 tokio-modbus = { version = "0.9", features = ["tcp"] }
 
 # Web framework - using warp for now as it's more stable
-warp = "0.3"
+warp = "0.4"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
