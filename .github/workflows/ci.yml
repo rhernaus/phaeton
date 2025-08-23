@@ -113,6 +113,8 @@ jobs:
             cmake \
             make \
             perl \
+            libc6-dev-armhf-cross \
+            libc6-dev-arm64-cross \
             ca-certificates
 
       - name: Configure cross env
