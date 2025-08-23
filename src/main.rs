@@ -23,9 +23,13 @@ async fn main() -> Result<()> {
     // Spawn web server
     let web_driver = driver_arc.clone();
     let web_task = tokio::spawn(async move {
-        let web = WebServer::new(web_driver).await.expect("web init");
-        // Defaults; in the future use config
-        if let Err(e) = web.start("127.0.0.1", 8088).await {
+        let web = WebServer::new(web_driver.clone()).await.expect("web init");
+        // Use configured host/port
+        let (host, port) = {
+            let drv = web_driver.lock().await;
+            (drv.config().web.host.clone(), drv.config().web.port)
+        };
+        if let Err(e) = web.start(&host, port).await {
             error!("Web server error: {}", e);
         }
     });

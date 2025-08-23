@@ -7,8 +7,10 @@ use crate::error::Result;
 use crate::logging::get_logger;
 use serde::Deserialize;
 use serde_json::json;
+use std::net::IpAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use warp::http::Method;
 use warp::{Filter, Rejection, Reply};
 
 /// Web server for Phaeton
@@ -35,6 +37,11 @@ struct SetCurrentBody {
 #[derive(Debug, Deserialize)]
 struct UpdateConfigBody {
     config: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize)]
+struct TailParams {
+    lines: Option<usize>,
 }
 
 impl WebServer {
@@ -84,12 +91,28 @@ impl WebServer {
             .and(warp::body::json())
             .and_then(handle_put_config);
 
+        // Logs tail endpoint
+        let logs_tail = warp::path!("api" / "logs" / "tail")
+            .and(warp::get())
+            .and(with_driver(driver.clone()))
+            .and(warp::query::<TailParams>())
+            .and_then(handle_logs_tail);
+
+        // Static UI under /ui
+        let ui_index = warp::path("ui")
+            .and(warp::path::end())
+            .and(warp::fs::file("./webui/index.html"));
+        let ui_files = warp::path("ui").and(warp::fs::dir("./webui"));
+
         status
             .or(post_mode)
             .or(post_startstop)
             .or(post_set_current)
             .or(get_config)
             .or(put_config)
+            .or(logs_tail)
+            .or(ui_index)
+            .or(ui_files)
             .or(index)
     }
 
@@ -101,7 +124,24 @@ impl WebServer {
         self.logger
             .info(&format!("Starting web server on {}", addr));
 
-        warp::serve(routes).run(([127, 0, 0, 1], port)).await;
+        // Enable permissive CORS for local development
+        let cors = warp::cors()
+            .allow_any_origin()
+            .allow_methods(vec![
+                Method::GET,
+                Method::POST,
+                Method::PUT,
+                Method::OPTIONS,
+            ])
+            .allow_headers(vec!["content-type"]);
+
+        let routes = routes.with(cors);
+
+        let ip: IpAddr = host
+            .parse()
+            .unwrap_or_else(|_| IpAddr::from([127, 0, 0, 1]));
+
+        warp::serve(routes).run((ip, port)).await;
 
         Ok(())
     }
@@ -198,4 +238,39 @@ async fn handle_put_config(
         ));
     }
     Ok(warp::reply::with_status("OK", warp::http::StatusCode::OK))
+}
+
+async fn handle_logs_tail(
+    driver: Arc<Mutex<AlfenDriver>>,
+    params: TailParams,
+) -> std::result::Result<impl Reply, Rejection> {
+    let (log_path, max_lines) = {
+        let drv = driver.lock().await;
+        (
+            drv.config().logging.file.clone(),
+            params.lines.unwrap_or(200).min(10_000),
+        )
+    };
+
+    let resp = match tokio::fs::read_to_string(&log_path).await {
+        Ok(contents) => {
+            let mut lines: Vec<&str> = contents.lines().collect();
+            if lines.len() > max_lines {
+                lines = lines.split_off(lines.len() - max_lines);
+            }
+            let body = lines.join("\n");
+            let reply = warp::reply::with_header(body, "Content-Type", "text/plain; charset=utf-8");
+            reply.into_response()
+        }
+        Err(_) => {
+            let reply = warp::reply::with_status(
+                "Log file not available",
+                warp::http::StatusCode::NOT_FOUND,
+            );
+            let reply =
+                warp::reply::with_header(reply, "Content-Type", "text/plain; charset=utf-8");
+            reply.into_response()
+        }
+    };
+    Ok(resp)
 }
