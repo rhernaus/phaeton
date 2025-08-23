@@ -8,7 +8,8 @@ This project is a complete rewrite of the Python Alfen EV charger driver in Rust
 - **Phase**: Foundation setup (Phase 1) - **COMPLETED** ✅
 - **Edition**: Migrated to Rust 2024 ✅
 - **Code Quality**: Clippy clean with zero warnings ✅
-- **CI**: GitHub Actions configured; cross-compilation passing for ARMv7 and AArch64 ✅
+- **Build/cross**: Cross-compilation profiles present for ARMv7 and AArch64 ✅
+- **CI/CD**: GitHub Actions configured (tests, audit, builds, cross artifacts)
 
 ## Project Structure
 ```
@@ -70,15 +71,15 @@ phaeton/
   - `TibberConfig` ✅
   - Main `Config` struct ✅
 - [x] **Implement configuration validation** with custom validation rules
-- [x] **Add configuration hot-reloading** capability - Framework in place
-- [x] **Support environment variable overrides** for Docker/containerized deployments
-- [x] **Create configuration migration** logic for backward compatibility - Framework ready
+- [ ] **Add configuration hot-reloading** capability
+- [ ] **Support environment variable overrides** (e.g., for containers)
+- [ ] **Create configuration migration** logic for backward compatibility
 
 ## 1.3 Logging System
 - [x] **Implement structured logging** using `tracing`
 - [x] **Configure multiple output formats** (JSON, human-readable)
 - [x] **Set up log rotation** and file management - Using tracing-appender
-- [x] **Implement log streaming** for web UI integration - Framework in place
+- [ ] **Implement log streaming** for web UI integration (SSE/WebSocket)
 - [x] **Add performance tracing** for Modbus operations and control loops
 - [x] **Create log context** system for request tracing
 
@@ -109,6 +110,8 @@ phaeton/
 - [ ] **Add state persistence** and restoration on startup
 - [ ] **Implement watchdog mechanisms** for fault tolerance
 - [ ] **Create event system** for status changes and notifications
+ - [ ] **Wire persistence and sessions** into the driver run loop
+ - [ ] **Implement status mapping parity** (e.g., LOW_SOC, WAIT_* states)
 
 ## 2.3 Session Management
 - [ ] **Implement charging session tracking** with start/end detection
@@ -128,21 +131,28 @@ phaeton/
   - `/Mode`, `/StartStop`, `/SetCurrent`
   - `/Ac/Voltage`, `/Ac/Current`, `/Ac/Power`
   - `/Ac/Energy/Forward`, `/ChargingTime`
-  - Vehicle information paths
+  - `/DeviceInstance`, `/ProductName`, `/FirmwareVersion`, `/Serial`
+  - Per-phase metrics: `/Ac/L1|L2|L3/Voltage`, `/Ac/L1|L2|L3/Current`, `/Ac/L1|L2|L3/Power`
+  - Other: `/Ac/PhaseCount`, `/Current`, `/Status`
+  - Vehicle information paths: `/Vehicle/Provider`, `/Vehicle/Name`, `/Vehicle/VIN`, `/Vehicle/Soc`, `/Vehicle/Lat`, `/Vehicle/Lon`, `/Vehicle/Asleep`, `/Vehicle/Timestamp`
 - [ ] **Add callback handling** for control operations
 - [ ] **Implement Victron energy rate detection** from system D-Bus
 
 ## 3.2 Web Server & API
-- [ ] **Implement HTTP server** using `axum` framework
-- [ ] **Create REST API endpoints**:
+- [ ] **Decide web framework**: keep `warp` (current) or migrate to `axum`, then implement server
+- [ ] **Create REST API endpoints** (parity with Python):
   - `GET /api/status` - Current system status
   - `GET /api/config` - Configuration retrieval
   - `PUT /api/config` - Configuration updates
+  - `GET /api/config/schema` - Configuration schema
   - `POST /api/mode` - Mode switching
   - `POST /api/startstop` - Start/stop charging
   - `POST /api/set_current` - Current adjustment
-- [ ] **Add static file serving** for web UI
-- [ ] **Implement WebSocket support** for real-time updates
+  - `GET /api/update/status`, `POST /api/update/check`, `POST /api/update/apply`
+  - `GET /api/update/branches`, `POST /api/update/checkout`
+  - `GET /api/logs/recent`, `GET /api/logs/stream` (SSE) or WebSocket
+- [ ] **Serve static UI** under `/ui` (web assets)
+- [ ] **Implement real-time updates** via SSE or WebSocket
 - [ ] **Add CORS middleware** for local development
 - [ ] **Create API documentation** with OpenAPI/Swagger
 
@@ -257,8 +267,8 @@ phaeton/
 6. 🚧 Build core driver logic
 
 ## Additional Completed Infrastructure
-7. ✅ Set up GitHub Actions CI/CD pipeline
-8. ✅ Configure Dependabot for automated dependency updates
+7. ✅ GitHub Actions CI/CD workflow present (tests, audit, macOS/Linux builds, cross)
+8. ✅ Dependabot configured (cargo and actions)
 9. ✅ Resolve all clippy warnings and errors (zero warnings)
 10. ✅ Implement comprehensive error handling system
 11. ✅ Create all core modules with proper architecture
