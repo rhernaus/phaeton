@@ -158,7 +158,7 @@ impl AlfenDriver {
         self.state.send(DriverState::Running).ok();
 
         // Initialize D-Bus service (stub) and start
-        let mut dbus = DbusService::new().await?;
+        let mut dbus = DbusService::new(self.config.device_instance).await?;
         dbus.start().await?;
         self.dbus = Some(dbus);
 
@@ -531,6 +531,27 @@ impl AlfenDriver {
     /// Get configuration reference
     pub fn config(&self) -> &Config {
         &self.config
+    }
+
+    /// Accessors for web/UI
+    pub fn current_mode_code(&self) -> u8 {
+        self.current_mode as u8
+    }
+
+    pub fn start_stop_code(&self) -> u8 {
+        self.start_stop as u8
+    }
+
+    pub fn get_intended_set_current(&self) -> f32 {
+        self.intended_set_current
+    }
+
+    pub fn get_station_max_current(&self) -> f32 {
+        self.station_max_current
+    }
+
+    pub fn get_db_value(&self, path: &str) -> Option<serde_json::Value> {
+        self.dbus.as_ref().and_then(|d| d.get(path)).cloned()
     }
 }
 
