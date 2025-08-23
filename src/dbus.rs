@@ -3,7 +3,7 @@
 //! This module provides D-Bus service integration to expose the charger
 //! as a standard Victron device on Venus OS.
 
-use crate::error::{Result, PhaetonError};
+use crate::error::{PhaetonError, Result};
 use crate::logging::get_logger;
 
 /// D-Bus service manager
@@ -46,7 +46,8 @@ impl DbusService {
 
     /// Update a D-Bus path value
     pub async fn update_path(&mut self, path: &str, value: serde_json::Value) -> Result<()> {
-        self.logger.debug(&format!("Updating D-Bus path {}: {:?}", path, value));
+        self.logger
+            .debug(&format!("Updating D-Bus path {}: {:?}", path, value));
 
         // TODO: Implement D-Bus path updates
 

@@ -4,13 +4,13 @@
 //! handling both socket slave (real-time data) and station slave (configuration)
 //! operations with proper error handling and connection management.
 
-use std::time::Duration;
-use tokio::time::{timeout, sleep};
-use tokio_modbus::prelude::*;
-use tokio_modbus::client::tcp;
-use crate::error::{PhaetonError, Result};
 use crate::config::{Config, ModbusConfig};
+use crate::error::{PhaetonError, Result};
 use crate::logging::get_logger;
+use std::time::Duration;
+use tokio::time::{sleep, timeout};
+use tokio_modbus::client::tcp;
+use tokio_modbus::prelude::*;
 
 /// Modbus TCP client for Alfen communication
 pub struct ModbusClient {
@@ -47,11 +47,12 @@ impl ModbusClient {
     pub async fn connect(&mut self) -> Result<()> {
         let address = format!("{}:{}", self.config.ip, self.config.port);
 
-        self.logger.info(&format!("Connecting to Modbus server at {}", address));
+        self.logger
+            .info(&format!("Connecting to Modbus server at {}", address));
 
-        let socket_addr: std::net::SocketAddr = address.parse().map_err(|e| {
-            PhaetonError::modbus(format!("Invalid socket address: {}", e))
-        })?;
+        let socket_addr: std::net::SocketAddr = address
+            .parse()
+            .map_err(|e| PhaetonError::modbus(format!("Invalid socket address: {}", e)))?;
 
         match timeout(self.connection_timeout, tcp::connect(socket_addr)).await {
             Ok(Ok(client)) => {
@@ -108,7 +109,11 @@ impl ModbusClient {
 
         match timeout(timeout_duration, request).await {
             Ok(Ok(response)) => {
-                self.logger.trace(&format!("Read {} registers: {:?}", response.len(), response));
+                self.logger.trace(&format!(
+                    "Read {} registers: {:?}",
+                    response.len(),
+                    response
+                ));
                 Ok(response)
             }
             Ok(Err(e)) => {
@@ -172,7 +177,9 @@ impl ModbusClient {
         // Log before borrowing client
         self.logger.debug(&format!(
             "Writing {} values to registers starting at {} on slave {}",
-            values.len(), address, slave_id
+            values.len(),
+            address,
+            slave_id
         ));
 
         let client = self.get_client()?;
@@ -198,9 +205,9 @@ impl ModbusClient {
 
     /// Get client reference or error if not connected
     fn get_client(&mut self) -> Result<&mut tokio_modbus::client::Context> {
-        self.client.as_mut().ok_or_else(|| {
-            PhaetonError::modbus("Not connected to Modbus server")
-        })
+        self.client
+            .as_mut()
+            .ok_or_else(|| PhaetonError::modbus("Not connected to Modbus server"))
     }
 }
 
@@ -209,7 +216,9 @@ impl ModbusClient {
 /// Decode 32-bit float from two 16-bit registers (big-endian)
 pub fn decode_32bit_float(registers: &[u16]) -> Result<f32> {
     if registers.len() < 2 {
-        return Err(PhaetonError::modbus("Insufficient registers for 32-bit float"));
+        return Err(PhaetonError::modbus(
+            "Insufficient registers for 32-bit float",
+        ));
     }
 
     let bytes = [
@@ -226,7 +235,9 @@ pub fn decode_32bit_float(registers: &[u16]) -> Result<f32> {
 /// Decode 64-bit float from four 16-bit registers (big-endian)
 pub fn decode_64bit_float(registers: &[u16]) -> Result<f64> {
     if registers.len() < 4 {
-        return Err(PhaetonError::modbus("Insufficient registers for 64-bit float"));
+        return Err(PhaetonError::modbus(
+            "Insufficient registers for 64-bit float",
+        ));
     }
 
     let bytes = [
@@ -298,10 +309,7 @@ impl ModbusConnectionManager {
     }
 
     /// Execute a Modbus operation with automatic reconnection
-    pub async fn execute_with_reconnect<F, Fut, T>(
-        &mut self,
-        operation: F,
-    ) -> Result<T>
+    pub async fn execute_with_reconnect<F, Fut, T>(&mut self, operation: F) -> Result<T>
     where
         F: Fn(&mut ModbusClient) -> Fut,
         Fut: std::future::Future<Output = Result<T>>,
@@ -316,7 +324,8 @@ impl ModbusConnectionManager {
                     if attempts >= self.max_retry_attempts {
                         return Err(e);
                     }
-                    self.logger.warn(&format!("Connection attempt {} failed: {}", attempts, e));
+                    self.logger
+                        .warn(&format!("Connection attempt {} failed: {}", attempts, e));
                     sleep(self.retry_delay).await;
                     continue;
                 }
@@ -328,7 +337,8 @@ impl ModbusConnectionManager {
                 Err(e) => {
                     // Check if it's a connection error that requires reconnection
                     if Self::is_connection_error(&e) {
-                        self.logger.warn(&format!("Operation failed due to connection error: {}", e));
+                        self.logger
+                            .warn(&format!("Operation failed due to connection error: {}", e));
                         self.client.disconnect().await.ok(); // Ignore disconnect errors
                         attempts += 1;
                         if attempts >= self.max_retry_attempts {
@@ -348,10 +358,10 @@ impl ModbusConnectionManager {
     fn is_connection_error(error: &PhaetonError) -> bool {
         match error {
             PhaetonError::Modbus { message: msg } => {
-                msg.contains("connection") ||
-                msg.contains("Connection") ||
-                msg.contains("timeout") ||
-                msg.contains("disconnected")
+                msg.contains("connection")
+                    || msg.contains("Connection")
+                    || msg.contains("timeout")
+                    || msg.contains("disconnected")
             }
             PhaetonError::Timeout { message: _ } => true,
             _ => false,

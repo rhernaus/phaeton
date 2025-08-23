@@ -3,12 +3,12 @@
 //! This module contains the main driver state machine and orchestration logic
 //! that coordinates all the different components of the system.
 
-use tokio::sync::{mpsc, watch};
-use tokio::time::{Duration, interval};
-use crate::error::{Result, PhaetonError};
 use crate::config::Config;
+use crate::error::{PhaetonError, Result};
 use crate::logging::{get_logger, LogContext};
 use crate::modbus::ModbusConnectionManager;
+use tokio::sync::{mpsc, watch};
+use tokio::time::{interval, Duration};
 
 /// Main driver state
 #[derive(Debug, Clone)]
@@ -55,8 +55,7 @@ impl AlfenDriver {
         // Initialize logging
         crate::logging::init_logging(&config.logging)?;
 
-        let _context = LogContext::new("driver")
-            .with_device_instance(config.device_instance);
+        let _context = LogContext::new("driver").with_device_instance(config.device_instance);
 
         let logger = get_logger("driver");
 

@@ -3,10 +3,10 @@
 //! This module handles saving and loading persistent state including
 //! configuration changes and driver state across restarts.
 
-use std::path::Path;
-use serde::{Deserialize, Serialize};
-use crate::error::{Result, PhaetonError};
+use crate::error::{PhaetonError, Result};
 use crate::logging::get_logger;
+use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 /// Persistent state structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,7 +52,8 @@ impl PersistenceManager {
         let path = Path::new(&self.file_path);
 
         if !path.exists() {
-            self.logger.info("No persistent state file found, using defaults");
+            self.logger
+                .info("No persistent state file found, using defaults");
             return Ok(());
         }
 
@@ -106,7 +107,7 @@ impl PersistenceManager {
 impl Default for PersistentState {
     fn default() -> Self {
         Self {
-            mode: 0, // Manual mode
+            mode: 0,       // Manual mode
             start_stop: 0, // Stopped
             set_current: 6.0,
             insufficient_solar_start: 0.0,

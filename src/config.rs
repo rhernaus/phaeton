@@ -3,10 +3,10 @@
 //! This module handles loading, validation, and management of the application
 //! configuration from YAML files with support for environment variable overrides.
 
+use crate::error::{PhaetonError, Result};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
-use serde::{Deserialize, Serialize};
-use crate::error::{PhaetonError, Result};
 
 /// Main configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -326,9 +326,7 @@ impl Default for LoggingConfig {
 
 impl Default for ScheduleConfig {
     fn default() -> Self {
-        Self {
-            items: Vec::new(),
-        }
+        Self { items: Vec::new() }
     }
 }
 
@@ -442,25 +440,40 @@ impl Config {
     pub fn validate(&self) -> Result<()> {
         // Validate Modbus configuration
         if self.modbus.ip.is_empty() {
-            return Err(PhaetonError::validation("modbus.ip", "IP address cannot be empty"));
+            return Err(PhaetonError::validation(
+                "modbus.ip",
+                "IP address cannot be empty",
+            ));
         }
 
         if self.modbus.port == 0 {
-            return Err(PhaetonError::validation("modbus.port", "Port must be greater than 0"));
+            return Err(PhaetonError::validation(
+                "modbus.port",
+                "Port must be greater than 0",
+            ));
         }
 
         // Validate current limits
         if self.defaults.intended_set_current <= 0.0 {
-            return Err(PhaetonError::validation("defaults.intended_set_current", "Must be positive"));
+            return Err(PhaetonError::validation(
+                "defaults.intended_set_current",
+                "Must be positive",
+            ));
         }
 
         if self.defaults.station_max_current <= 0.0 {
-            return Err(PhaetonError::validation("defaults.station_max_current", "Must be positive"));
+            return Err(PhaetonError::validation(
+                "defaults.station_max_current",
+                "Must be positive",
+            ));
         }
 
         // Validate polling interval
         if self.poll_interval_ms == 0 {
-            return Err(PhaetonError::validation("poll_interval_ms", "Must be greater than 0"));
+            return Err(PhaetonError::validation(
+                "poll_interval_ms",
+                "Must be greater than 0",
+            ));
         }
 
         Ok(())

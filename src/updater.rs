@@ -3,9 +3,9 @@
 //! This module provides Git-based self-update capabilities to keep
 //! the application up-to-date with the latest releases.
 
-use std::path::Path;
-use crate::error::{Result, PhaetonError};
+use crate::error::{PhaetonError, Result};
 use crate::logging::get_logger;
+use std::path::Path;
 
 /// Update status information
 #[derive(Debug, Clone)]
@@ -42,10 +42,12 @@ impl GitUpdater {
             current_version: "0.1.0".to_string(),
             latest_version: Some("0.1.0".to_string()),
             update_available: false,
-            last_check: Some(std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs()),
+            last_check: Some(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+            ),
             error: None,
         })
     }
@@ -53,7 +55,9 @@ impl GitUpdater {
     /// Apply available updates
     pub async fn apply_updates(&mut self) -> Result<()> {
         // TODO: Implement Git update application
-        Err(PhaetonError::update("Update functionality not yet implemented"))
+        Err(PhaetonError::update(
+            "Update functionality not yet implemented",
+        ))
     }
 
     /// Get current status

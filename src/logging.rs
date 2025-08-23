@@ -3,12 +3,12 @@
 //! This module provides comprehensive logging functionality with support for
 //! structured logging, log rotation, and integration with the tracing ecosystem.
 
-use std::path::Path;
-use tracing::{info, warn, error, debug, trace, Level};
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
-use tracing_appender::{non_blocking, rolling};
-use crate::error::{PhaetonError, Result};
 use crate::config::LoggingConfig;
+use crate::error::{PhaetonError, Result};
+use std::path::Path;
+use tracing::{debug, error, info, trace, warn, Level};
+use tracing_appender::{non_blocking, rolling};
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 
 /// Initialize logging system based on configuration
 pub fn init_logging(config: &LoggingConfig) -> Result<()> {
@@ -17,9 +17,7 @@ pub fn init_logging(config: &LoggingConfig) -> Result<()> {
 
     // Create environment filter
     let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| {
-            format!("phaeton={},tokio_modbus=warn", level).into()
-        });
+        .unwrap_or_else(|_| format!("phaeton={},tokio_modbus=warn", level).into());
 
     // Set up log file appender with rotation
     let file_appender = rolling::Builder::new()
@@ -33,8 +31,7 @@ pub fn init_logging(config: &LoggingConfig) -> Result<()> {
     let (non_blocking_appender, _guard) = non_blocking(file_appender);
 
     // Create registry with multiple layers
-    let registry = tracing_subscriber::registry()
-        .with(filter);
+    let registry = tracing_subscriber::registry().with(filter);
 
     // Add file logging layer
     let file_layer = fmt::layer()
@@ -61,7 +58,10 @@ pub fn init_logging(config: &LoggingConfig) -> Result<()> {
     // Initialize the subscriber
     subscriber.init();
 
-    info!("Logging initialized - level: {}, file: {}", level, config.file);
+    info!(
+        "Logging initialized - level: {}, file: {}",
+        level, config.file
+    );
 
     Ok(())
 }
@@ -74,7 +74,10 @@ fn parse_log_level(level_str: &str) -> Result<Level> {
         "INFO" => Ok(Level::INFO),
         "WARN" => Ok(Level::WARN),
         "ERROR" => Ok(Level::ERROR),
-        _ => Err(PhaetonError::config(format!("Invalid log level: {}", level_str))),
+        _ => Err(PhaetonError::config(format!(
+            "Invalid log level: {}",
+            level_str
+        ))),
     }
 }
 

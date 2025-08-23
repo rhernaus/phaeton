@@ -3,10 +3,10 @@
 //! This module handles tracking and management of charging sessions,
 //! including energy consumption, duration, and cost calculations.
 
+use crate::error::{PhaetonError, Result};
+use crate::logging::get_logger;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use crate::error::{Result, PhaetonError};
-use crate::logging::get_logger;
 
 /// Charging session state
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -109,7 +109,8 @@ impl ChargingSessionManager {
             status: SessionStatus::Active,
         };
 
-        self.logger.info(&format!("Started charging session {}", session.id));
+        self.logger
+            .info(&format!("Started charging session {}", session.id));
         self.current_session = Some(session);
 
         Ok(())
@@ -171,9 +172,14 @@ impl ChargingSessionManager {
 
         if let Some(ref session) = self.current_session {
             stats.insert("session_active".to_string(), true.into());
-            stats.insert("session_duration_min".to_string(),
-                (((Utc::now() - session.start_time).num_seconds() / 60) as u64).into());
-            stats.insert("energy_delivered_kwh".to_string(), session.energy_delivered_kwh.into());
+            stats.insert(
+                "session_duration_min".to_string(),
+                (((Utc::now() - session.start_time).num_seconds() / 60) as u64).into(),
+            );
+            stats.insert(
+                "energy_delivered_kwh".to_string(),
+                session.energy_delivered_kwh.into(),
+            );
         } else {
             stats.insert("session_active".to_string(), false.into());
             stats.insert("session_duration_min".to_string(), serde_json::Value::Null);

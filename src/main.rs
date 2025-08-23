@@ -1,11 +1,12 @@
 use anyhow::Result;
 use phaeton::driver::AlfenDriver;
-use tracing::{info, error};
+use tracing::{error, info};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize the driver
-    let mut driver = AlfenDriver::new().await
+    let mut driver = AlfenDriver::new()
+        .await
         .map_err(|e| anyhow::anyhow!("Failed to create driver: {}", e))?;
 
     info!("Phaeton Alfen EV Charger Driver starting up");

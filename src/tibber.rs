@@ -3,7 +3,7 @@
 //! This module provides integration with Tibber's API for dynamic
 //! electricity pricing to enable smart charging based on energy costs.
 
-use crate::error::{Result, PhaetonError};
+use crate::error::{PhaetonError, Result};
 use crate::logging::get_logger;
 
 /// Tibber API client

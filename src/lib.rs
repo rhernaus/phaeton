@@ -35,20 +35,20 @@
 //! - `updater`: Self-update functionality
 
 pub mod config;
+pub mod dbus;
+pub mod driver;
 pub mod error;
 pub mod logging;
 pub mod modbus;
-pub mod driver;
-pub mod dbus;
 // pub mod web; // Commented out due to warp compatibility issues
+pub mod controls;
 pub mod persistence;
 pub mod session;
-pub mod controls;
 pub mod tibber;
-pub mod vehicle;
 pub mod updater;
+pub mod vehicle;
 
 // Re-export commonly used types
 pub use config::Config;
 pub use driver::AlfenDriver;
-pub use error::{Result, PhaetonError};
+pub use error::{PhaetonError, Result};

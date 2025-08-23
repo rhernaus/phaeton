@@ -60,8 +60,6 @@ pub enum PhaetonError {
     #[error("Update error: {message}")]
     Update { message: String },
 
-
-
     /// Generic errors with context
     #[error("Error: {message}")]
     Generic { message: String },

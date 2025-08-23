@@ -3,7 +3,7 @@
 //! This module provides integration with vehicle APIs (Tesla, Kia)
 //! to enable smart charging based on vehicle state and needs.
 
-use crate::error::{Result, PhaetonError};
+use crate::error::{PhaetonError, Result};
 use crate::logging::get_logger;
 
 /// Vehicle provider enumeration
@@ -58,7 +58,9 @@ impl TeslaVehicleClient {
 impl VehicleClient for TeslaVehicleClient {
     async fn fetch_status(&self) -> Result<VehicleStatus> {
         // TODO: Implement Tesla API integration
-        Err(PhaetonError::api("Tesla API integration not yet implemented"))
+        Err(PhaetonError::api(
+            "Tesla API integration not yet implemented",
+        ))
     }
 
     async fn wake_up(&self) -> Result<()> {

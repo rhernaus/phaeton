@@ -3,7 +3,7 @@
 //! This module contains the business logic for different charging modes
 //! including manual, automatic, and scheduled charging strategies.
 
-use crate::error::{Result, PhaetonError};
+use crate::error::{PhaetonError, Result};
 use crate::logging::get_logger;
 
 /// Charging mode enumeration
@@ -72,11 +72,7 @@ impl ChargingControls {
     }
 
     /// Apply current setting to charger
-    pub async fn apply_current(
-        &self,
-        _current: f32,
-        _explanation: &str,
-    ) -> Result<bool> {
+    pub async fn apply_current(&self, _current: f32, _explanation: &str) -> Result<bool> {
         // TODO: Implement actual current setting via Modbus
         Ok(true)
     }
