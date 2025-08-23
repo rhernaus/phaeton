@@ -99,6 +99,8 @@ impl DbusService {
         self.paths.get(path)
     }
 
+    // TODO: Export a real object tree with org.freedesktop.DBus.Properties to expose values on the bus.
+
     async fn request_name(&self, connection: &Connection) -> ZbusResult<()> {
         use zbus::fdo::{DBusProxy, RequestNameFlags};
         let proxy = DBusProxy::new(connection).await?;

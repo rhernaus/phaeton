@@ -120,6 +120,7 @@ async fn handle_mode(
     body: ModeBody,
 ) -> std::result::Result<impl Reply, Rejection> {
     let mut drv = driver.lock().await;
+    // Use driver's internal API directly; if desired, this could send via channel instead
     drv.set_mode(body.mode).await;
     Ok(warp::reply::with_status("OK", warp::http::StatusCode::OK))
 }

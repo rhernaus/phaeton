@@ -29,6 +29,14 @@ pub enum DriverState {
     ShuttingDown,
 }
 
+/// Commands accepted by the driver from external components (web, etc.)
+#[derive(Debug, Clone)]
+pub enum DriverCommand {
+    SetMode(u8),
+    SetStartStop(u8),
+    SetCurrent(f32),
+}
+
 /// Main driver for Phaeton
 pub struct AlfenDriver {
     /// Configuration
@@ -70,11 +78,14 @@ pub struct AlfenDriver {
     last_current_set_time: std::time::Instant,
     /// Last observed Victron-esque status (0=Disc,1=Conn,2=Charging)
     last_status: u8,
+
+    /// Command receiver for external control
+    commands_rx: mpsc::UnboundedReceiver<DriverCommand>,
 }
 
 impl AlfenDriver {
     /// Create a new driver instance
-    pub async fn new() -> Result<Self> {
+    pub async fn new(commands_rx: mpsc::UnboundedReceiver<DriverCommand>) -> Result<Self> {
         let config = Config::load().map_err(|e| {
             eprintln!("Failed to load configuration: {}", e);
             e
@@ -144,6 +155,7 @@ impl AlfenDriver {
             last_sent_current: 0.0,
             last_current_set_time: std::time::Instant::now(),
             last_status: 0,
+            commands_rx,
         })
     }
 
@@ -202,6 +214,9 @@ impl AlfenDriver {
                         self.logger.error(&format!("Poll cycle failed: {}", e));
                         // Continue polling even on errors
                     }
+                }
+                Some(cmd) = self.commands_rx.recv() => {
+                    self.handle_command(cmd).await;
                 }
                 _ = self.shutdown_rx.recv() => {
                     self.logger.info("Shutdown signal received");
@@ -556,6 +571,15 @@ impl AlfenDriver {
 }
 
 impl AlfenDriver {
+    /// Handle external command
+    async fn handle_command(&mut self, cmd: DriverCommand) {
+        match cmd {
+            DriverCommand::SetMode(m) => self.set_mode(m).await,
+            DriverCommand::SetStartStop(v) => self.set_start_stop(v).await,
+            DriverCommand::SetCurrent(a) => self.set_intended_current(a).await,
+        }
+    }
+
     /// Map Alfen Mode3 status string to Victron-esque numeric status
     /// 0=Disconnected, 1=Connected, 2=Charging
     fn map_alfen_status_to_victron(status_str: &str) -> u8 {
