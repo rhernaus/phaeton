@@ -10,7 +10,9 @@ use serde_json::json;
 use std::net::IpAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 use warp::http::Method;
+use warp::sse::Event;
 use warp::{Filter, Rejection, Reply};
 
 /// Web server for Phaeton
@@ -104,6 +106,12 @@ impl WebServer {
             .and(warp::fs::file("./webui/index.html"));
         let ui_files = warp::path("ui").and(warp::fs::dir("./webui"));
 
+        // SSE events: live status stream
+        let events = warp::path!("api" / "events")
+            .and(warp::get())
+            .and(with_driver(driver.clone()))
+            .and_then(handle_events);
+
         status
             .or(post_mode)
             .or(post_startstop)
@@ -113,6 +121,7 @@ impl WebServer {
             .or(logs_tail)
             .or(ui_index)
             .or(ui_files)
+            .or(events)
             .or(index)
     }
 
@@ -273,4 +282,24 @@ async fn handle_logs_tail(
         }
     };
     Ok(resp)
+}
+
+async fn handle_events(
+    driver: Arc<Mutex<AlfenDriver>>,
+) -> std::result::Result<impl Reply, Rejection> {
+    // Subscribe to driver's broadcast channel
+    let rx = {
+        let drv = driver.lock().await;
+        drv.subscribe_status()
+    };
+
+    let stream = BroadcastStream::new(rx).filter_map(|msg| match msg {
+        Ok(payload) => {
+            let ev: Event = Event::default().event("status").data(payload);
+            Some(Ok::<Event, std::convert::Infallible>(ev))
+        }
+        Err(_) => None,
+    });
+
+    Ok(warp::sse::reply(warp::sse::keep_alive().stream(stream)))
 }

@@ -14,7 +14,7 @@ readme = "README.md"
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }
 tokio-util = "0.7"
-tokio-stream = "0.1"
+tokio-stream = { version = "0.1", features = ["sync"] }
 
 # Modbus TCP client
 tokio-modbus = { version = "0.16.1", features = ["tcp"] }
