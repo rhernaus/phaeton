@@ -477,8 +477,6 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
-    use tempfile::NamedTempFile;
 
     #[test]
     fn test_default_config() {

@@ -259,15 +259,23 @@ pub fn decode_string(registers: &[u16], max_length: Option<usize>) -> Result<Str
     let mut bytes = Vec::new();
 
     for &reg in registers {
-        bytes.push((reg >> 8) as u8);
-        bytes.push((reg & 0xFF) as u8);
+        let high_byte = (reg >> 8) as u8;
+        let low_byte = (reg & 0xFF) as u8;
+
+        // Skip null bytes (common in Modbus string encoding)
+        if high_byte != 0 {
+            bytes.push(high_byte);
+        }
+        if low_byte != 0 {
+            bytes.push(low_byte);
+        }
     }
 
-    // Remove null terminators and trailing whitespace
+    // Convert to string and trim any remaining whitespace
     let string = String::from_utf8(bytes)
         .map_err(|e| PhaetonError::modbus(format!("Invalid UTF-8 string: {}", e)))?;
 
-    let string = string.trim_matches('\0').trim();
+    let string = string.trim();
 
     if let Some(max_len) = max_length {
         Ok(string.chars().take(max_len).collect())
