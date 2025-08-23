@@ -82,50 +82,67 @@ jobs:
 
     - name: Install cross-compilation tools
       run: |
-        # Add architecture support for cross-compilation
-        if [ "${{ matrix.target.triple }}" = "armv7-unknown-linux-gnueabihf" ]; then
-          sudo dpkg --add-architecture armhf
-        elif [ "${{ matrix.target.triple }}" = "aarch64-unknown-linux-gnu" ]; then
-          sudo dpkg --add-architecture arm64
-        fi
-
-        # Update package lists after adding architecture
+        # Install basic cross-compilation tools first
         sudo apt-get update
-
-        # Install basic cross-compilation tools
         sudo apt-get install -y ${{ matrix.target.gcc }}
 
-        # Install OpenSSL development libraries for cross-compilation
+        # For ARM targets, install additional cross-compilation packages
         if [ "${{ matrix.target.triple }}" = "armv7-unknown-linux-gnueabihf" ]; then
-          sudo apt-get install -y libssl-dev:armhf pkg-config-arm-linux-gnueabihf
+          # Install ARM cross-compilation toolchain
           sudo apt-get install -y gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
-          sudo apt-get install -y zlib1g-dev:armhf
+
+          # Install cross-architecture packages (add architecture support if needed)
+          sudo dpkg --add-architecture armhf || true
+          sudo apt-get update
+
+          # Try to install cross-architecture packages, fallback if not available
+          sudo apt-get install -y libssl-dev:armhf || echo "libssl-dev:armhf not available, using native"
+          sudo apt-get install -y pkg-config-arm-linux-gnueabihf || echo "pkg-config-arm-linux-gnueabihf not available, using pkg-config"
+          sudo apt-get install -y zlib1g-dev:armhf || echo "zlib1g-dev:armhf not available, using native"
+
         elif [ "${{ matrix.target.triple }}" = "aarch64-unknown-linux-gnu" ]; then
-          sudo apt-get install -y libssl-dev:arm64 pkg-config-aarch64-linux-gnu
+          # Install ARM64 cross-compilation toolchain
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-          sudo apt-get install -y zlib1g-dev:arm64
+
+          # Install cross-architecture packages (add architecture support if needed)
+          sudo dpkg --add-architecture arm64 || true
+          sudo apt-get update
+
+          # Try to install cross-architecture packages, fallback if not available
+          sudo apt-get install -y libssl-dev:arm64 || echo "libssl-dev:arm64 not available, using native"
+          sudo apt-get install -y pkg-config-aarch64-linux-gnu || echo "pkg-config-aarch64-linux-gnu not available, using pkg-config"
+          sudo apt-get install -y zlib1g-dev:arm64 || echo "zlib1g-dev:arm64 not available, using native"
         fi
 
         # Install additional dependencies for cross-compilation
         sudo apt-get install -y pkg-config build-essential
 
+        # Install OpenSSL development libraries for native architecture as fallback
+        sudo apt-get install -y libssl-dev zlib1g-dev
+
     - name: Build for target
       run: |
         # Set environment variables for cross-compilation
         if [ "${{ matrix.target.triple }}" = "armv7-unknown-linux-gnueabihf" ]; then
-          export PKG_CONFIG_PATH=/usr/lib/arm-linux-gnueabihf/pkgconfig
-          export PKG_CONFIG_SYSROOT_DIR=/
+          # Try cross-architecture paths first, fallback to native
+          if [ -d "/usr/lib/arm-linux-gnueabihf" ]; then
+            export PKG_CONFIG_PATH=/usr/lib/arm-linux-gnueabihf/pkgconfig:$PKG_CONFIG_PATH
+            export PKG_CONFIG_SYSROOT_DIR=/
+            export ARMV7_UNKNOWN_LINUX_GNUEABIHF_OPENSSL_LIB_DIR=/usr/lib/arm-linux-gnueabihf
+            export ARMV7_UNKNOWN_LINUX_GNUEABIHF_OPENSSL_INCLUDE_DIR=/usr/include
+          fi
           export PKG_CONFIG_ALLOW_CROSS=1
           export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc
-          export ARMV7_UNKNOWN_LINUX_GNUEABIHF_OPENSSL_LIB_DIR=/usr/lib/arm-linux-gnueabihf
-          export ARMV7_UNKNOWN_LINUX_GNUEABIHF_OPENSSL_INCLUDE_DIR=/usr/include
         elif [ "${{ matrix.target.triple }}" = "aarch64-unknown-linux-gnu" ]; then
-          export PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig
-          export PKG_CONFIG_SYSROOT_DIR=/
+          # Try cross-architecture paths first, fallback to native
+          if [ -d "/usr/lib/aarch64-linux-gnu" ]; then
+            export PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig:$PKG_CONFIG_PATH
+            export PKG_CONFIG_SYSROOT_DIR=/
+            export AARCH64_UNKNOWN_LINUX_GNU_OPENSSL_LIB_DIR=/usr/lib/aarch64-linux-gnu
+            export AARCH64_UNKNOWN_LINUX_GNU_OPENSSL_INCLUDE_DIR=/usr/include
+          fi
           export PKG_CONFIG_ALLOW_CROSS=1
           export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
-          export AARCH64_UNKNOWN_LINUX_GNU_OPENSSL_LIB_DIR=/usr/lib/aarch64-linux-gnu
-          export AARCH64_UNKNOWN_LINUX_GNU_OPENSSL_INCLUDE_DIR=/usr/include
         fi
         cargo build --target ${{ matrix.target.triple }} --release --verbose
 
