@@ -39,7 +39,7 @@ tracing-appender = "0.2"
 zbus = { version = "4.0", default-features = false, features = ["tokio"] }
 
 # HTTP client for external APIs
-reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
 
 # Date and time handling
 chrono = { version = "0.4", features = ["serde"] }
