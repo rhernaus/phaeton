@@ -22,7 +22,7 @@ A high-performance Rust implementation of the Alfen EV charger driver for Victro
 
 ### Prerequisites
 
-- Rust 1.70+ with 2021 edition
+- Rust (stable) with 2024 edition
 - Venus OS or Linux system with D-Bus support
 - Alfen EV charger accessible via network
 
@@ -215,7 +215,7 @@ web:
 ### Docker
 
 ```dockerfile
-FROM rust:1.70-slim as builder
+FROM rust:1.83-slim as builder
 WORKDIR /app
 COPY . .
 RUN cargo build --release
