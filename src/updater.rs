@@ -18,8 +18,11 @@ pub struct UpdateStatus {
 
 /// Git updater for self-updates
 pub struct GitUpdater {
+    #[allow(dead_code)]
     repo_url: String,
+    #[allow(dead_code)]
     current_branch: String,
+    #[allow(dead_code)]
     logger: crate::logging::StructuredLogger,
 }
 

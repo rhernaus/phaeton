@@ -74,31 +74,31 @@ impl PersistenceManager {
     }
 
     /// Get a value from persistent state
-    pub fn get<T: for<'de> Deserialize<'de>>(&self, key: &str) -> Option<T> {
+    pub fn get<T: for<'de> Deserialize<'de>>(&self, _key: &str) -> Option<T> {
         // TODO: Implement key-based access
         None
     }
 
     /// Set a value in persistent state
-    pub fn set<T: Serialize>(&mut self, key: &str, value: T) -> Result<()> {
+    pub fn set<T: Serialize>(&mut self, _key: &str, _value: T) -> Result<()> {
         // TODO: Implement key-based storage
         Ok(())
     }
 
     /// Update entire state
-    pub fn update(&mut self, updates: serde_json::Value) -> Result<()> {
+    pub fn update(&mut self, _updates: serde_json::Value) -> Result<()> {
         // TODO: Implement state updates
         Ok(())
     }
 
     /// Get section from state
-    pub fn get_section(&self, section: &str) -> Option<serde_json::Value> {
+    pub fn get_section(&self, _section: &str) -> Option<serde_json::Value> {
         // TODO: Implement section access
         None
     }
 
     /// Set section in state
-    pub fn set_section(&mut self, section: &str, data: serde_json::Value) -> Result<()> {
+    pub fn set_section(&mut self, _section: &str, _data: serde_json::Value) -> Result<()> {
         // TODO: Implement section storage
         Ok(())
     }

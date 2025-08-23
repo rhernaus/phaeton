@@ -212,7 +212,6 @@ impl ModbusClient {
 }
 
 /// Utility functions for data conversion
-
 /// Decode 32-bit float from two 16-bit registers (big-endian)
 pub fn decode_32bit_float(registers: &[u16]) -> Result<f32> {
     if registers.len() < 2 {
@@ -289,6 +288,7 @@ pub fn encode_32bit_float(value: f32) -> [u16; 2] {
 /// Connection manager with automatic reconnection
 pub struct ModbusConnectionManager {
     client: ModbusClient,
+    #[allow(dead_code)]
     config: ModbusConfig,
     max_retry_attempts: u32,
     retry_delay: Duration,

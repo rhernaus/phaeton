@@ -31,6 +31,7 @@ pub enum StartStopState {
 
 /// Charging control system
 pub struct ChargingControls {
+    #[allow(dead_code)]
     logger: crate::logging::StructuredLogger,
 }
 
@@ -40,15 +41,24 @@ impl ChargingControls {
         let logger = get_logger("controls");
         Self { logger }
     }
+}
 
+impl Default for ChargingControls {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ChargingControls {
     /// Compute effective current based on mode and conditions
+    #[allow(clippy::too_many_arguments)]
     pub async fn compute_effective_current(
         &self,
         mode: ChargingMode,
         start_stop: StartStopState,
         requested_current: f32,
         station_max_current: f32,
-        current_time: f64,
+        _current_time: f64,
         _solar_power: Option<f32>,
         _config: &crate::config::Config,
     ) -> Result<f32> {

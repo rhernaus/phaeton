@@ -175,7 +175,7 @@ pub struct ScheduleItem {
 }
 
 /// Schedule configuration container
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ScheduleConfig {
     /// List of schedule items
     pub items: Vec<ScheduleItem>,
@@ -324,11 +324,7 @@ impl Default for LoggingConfig {
     }
 }
 
-impl Default for ScheduleConfig {
-    fn default() -> Self {
-        Self { items: Vec::new() }
-    }
-}
+
 
 impl Default for TibberConfig {
     fn default() -> Self {

@@ -36,9 +36,13 @@ pub trait VehicleClient: Send + Sync {
 
 /// Tesla vehicle client
 pub struct TeslaVehicleClient {
+    #[allow(dead_code)]
     access_token: String,
+    #[allow(dead_code)]
     vehicle_id: Option<u64>,
+    #[allow(dead_code)]
     vin: Option<String>,
+    #[allow(dead_code)]
     logger: crate::logging::StructuredLogger,
 }
 
@@ -71,12 +75,19 @@ impl VehicleClient for TeslaVehicleClient {
 
 /// Kia vehicle client
 pub struct KiaVehicleClient {
+    #[allow(dead_code)]
     username: String,
+    #[allow(dead_code)]
     password: String,
+    #[allow(dead_code)]
     pin: String,
+    #[allow(dead_code)]
     region: String,
+    #[allow(dead_code)]
     brand: String,
+    #[allow(dead_code)]
     vin: Option<String>,
+    #[allow(dead_code)]
     logger: crate::logging::StructuredLogger,
 }
 
@@ -113,6 +124,7 @@ impl VehicleClient for KiaVehicleClient {
 /// Vehicle integration manager
 pub struct VehicleIntegration {
     client: Option<Box<dyn VehicleClient>>,
+    #[allow(dead_code)]
     logger: crate::logging::StructuredLogger,
 }
 
@@ -124,7 +136,15 @@ impl VehicleIntegration {
             logger,
         }
     }
+}
 
+impl Default for VehicleIntegration {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl VehicleIntegration {
     pub fn set_client(&mut self, client: Box<dyn VehicleClient>) {
         self.client = Some(client);
     }

@@ -8,8 +8,11 @@ use crate::logging::get_logger;
 
 /// Tibber API client
 pub struct TibberClient {
+    #[allow(dead_code)]
     access_token: String,
+    #[allow(dead_code)]
     home_id: Option<String>,
+    #[allow(dead_code)]
     logger: crate::logging::StructuredLogger,
 }
 
