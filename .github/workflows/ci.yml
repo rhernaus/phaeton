@@ -65,9 +65,15 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        target:
-          - { name: "Cerbo GX (ARM v7)", triple: "armv7-unknown-linux-gnueabihf", gcc: "gcc-arm-linux-gnueabihf" }
-          - { name: "Linux ARM64", triple: "aarch64-unknown-linux-gnu", gcc: "gcc-aarch64-linux-gnu" }
+        include:
+          - target: armv7-unknown-linux-gnueabihf
+            name: "Cerbo GX (ARM v7)"
+            gcc_package: "gcc-arm-linux-gnueabihf"
+            arch: "armhf"
+          - target: aarch64-unknown-linux-gnu
+            name: "Linux ARM64"
+            gcc_package: "gcc-aarch64-linux-gnu"
+            arch: "arm64"
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -75,87 +81,110 @@ jobs:
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
       with:
-        targets: ${{ matrix.target.triple }}
+        targets: ${{ matrix.target }}
 
     - name: Cache dependencies
       uses: Swatinem/rust-cache@v2
 
     - name: Install cross-compilation tools
       run: |
-        # Install basic cross-compilation tools first
+        set -e  # Exit on any error
+
+        echo "Installing cross-compilation tools for ${{ matrix.name }} (${{ matrix.target }})"
+
+        # Update package lists
         sudo apt-get update
-        sudo apt-get install -y ${{ matrix.target.gcc }}
 
-        # For ARM targets, install additional cross-compilation packages
-        if [ "${{ matrix.target.triple }}" = "armv7-unknown-linux-gnueabihf" ]; then
-          # Install ARM cross-compilation toolchain
-          sudo apt-get install -y gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
+        # Install the cross-compiler (this should always be available)
+        echo "Installing cross-compiler: ${{ matrix.gcc_package }}"
+        sudo apt-get install -y ${{ matrix.gcc_package }}
 
-          # Install cross-architecture packages (add architecture support if needed)
-          sudo dpkg --add-architecture armhf || true
+        # Try to add the architecture - this might fail in some CI environments
+        echo "Attempting to add architecture: ${{ matrix.arch }}"
+        if sudo dpkg --add-architecture ${{ matrix.arch }} 2>/dev/null; then
+          echo "Successfully added ${{ matrix.arch }} architecture"
           sudo apt-get update
 
-          # Try to install cross-architecture packages, fallback if not available
-          sudo apt-get install -y libssl-dev:armhf || echo "libssl-dev:armhf not available, using native"
-          sudo apt-get install -y pkg-config-arm-linux-gnueabihf || echo "pkg-config-arm-linux-gnueabihf not available, using pkg-config"
-          sudo apt-get install -y zlib1g-dev:armhf || echo "zlib1g-dev:armhf not available, using native"
+          # Try to install cross-architecture packages (might not be available)
+          echo "Attempting to install cross-architecture packages..."
+          if sudo apt-get install -y libssl-dev:${{ matrix.arch }} 2>/dev/null; then
+            echo "Successfully installed libssl-dev:${{ matrix.arch }}"
+          else
+            echo "libssl-dev:${{ matrix.arch }} not available, will use native libraries"
+          fi
 
-        elif [ "${{ matrix.target.triple }}" = "aarch64-unknown-linux-gnu" ]; then
-          # Install ARM64 cross-compilation toolchain
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-
-          # Install cross-architecture packages (add architecture support if needed)
-          sudo dpkg --add-architecture arm64 || true
-          sudo apt-get update
-
-          # Try to install cross-architecture packages, fallback if not available
-          sudo apt-get install -y libssl-dev:arm64 || echo "libssl-dev:arm64 not available, using native"
-          sudo apt-get install -y pkg-config-aarch64-linux-gnu || echo "pkg-config-aarch64-linux-gnu not available, using pkg-config"
-          sudo apt-get install -y zlib1g-dev:arm64 || echo "zlib1g-dev:arm64 not available, using native"
+          if sudo apt-get install -y zlib1g-dev:${{ matrix.arch }} 2>/dev/null; then
+            echo "Successfully installed zlib1g-dev:${{ matrix.arch }}"
+          else
+            echo "zlib1g-dev:${{ matrix.arch }} not available, will use native libraries"
+          fi
+        else
+          echo "Could not add ${{ matrix.arch }} architecture, using native libraries"
         fi
 
-        # Install additional dependencies for cross-compilation
-        sudo apt-get install -y pkg-config build-essential
+        # Always install native development libraries as fallback
+        echo "Installing native development libraries..."
+        sudo apt-get install -y libssl-dev zlib1g-dev pkg-config build-essential
 
-        # Install OpenSSL development libraries for native architecture as fallback
-        sudo apt-get install -y libssl-dev zlib1g-dev
+        echo "Cross-compilation tools installation completed"
 
     - name: Build for target
       run: |
+        echo "Building for ${{ matrix.name }} (${{ matrix.target }})"
+
         # Set environment variables for cross-compilation
-        if [ "${{ matrix.target.triple }}" = "armv7-unknown-linux-gnueabihf" ]; then
-          # Try cross-architecture paths first, fallback to native
+        export PKG_CONFIG_ALLOW_CROSS=1
+
+        if [ "${{ matrix.target }}" = "armv7-unknown-linux-gnueabihf" ]; then
+          export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc
+
+          # Use cross-architecture libraries if available, otherwise use native
           if [ -d "/usr/lib/arm-linux-gnueabihf" ]; then
-            export PKG_CONFIG_PATH=/usr/lib/arm-linux-gnueabihf/pkgconfig:$PKG_CONFIG_PATH
+            export PKG_CONFIG_PATH=/usr/lib/arm-linux-gnueabihf/pkgconfig:/usr/lib/pkgconfig
             export PKG_CONFIG_SYSROOT_DIR=/
             export ARMV7_UNKNOWN_LINUX_GNUEABIHF_OPENSSL_LIB_DIR=/usr/lib/arm-linux-gnueabihf
             export ARMV7_UNKNOWN_LINUX_GNUEABIHF_OPENSSL_INCLUDE_DIR=/usr/include
+            echo "Using cross-architecture libraries for ARM v7"
+          else
+            export PKG_CONFIG_PATH=/usr/lib/pkgconfig
+            export ARMV7_UNKNOWN_LINUX_GNUEABIHF_OPENSSL_LIB_DIR=/usr/lib
+            export ARMV7_UNKNOWN_LINUX_GNUEABIHF_OPENSSL_INCLUDE_DIR=/usr/include
+            echo "Using native libraries for ARM v7 cross-compilation"
           fi
-          export PKG_CONFIG_ALLOW_CROSS=1
-          export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc
-        elif [ "${{ matrix.target.triple }}" = "aarch64-unknown-linux-gnu" ]; then
-          # Try cross-architecture paths first, fallback to native
+
+        elif [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+
+          # Use cross-architecture libraries if available, otherwise use native
           if [ -d "/usr/lib/aarch64-linux-gnu" ]; then
-            export PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig:$PKG_CONFIG_PATH
+            export PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/pkgconfig
             export PKG_CONFIG_SYSROOT_DIR=/
             export AARCH64_UNKNOWN_LINUX_GNU_OPENSSL_LIB_DIR=/usr/lib/aarch64-linux-gnu
             export AARCH64_UNKNOWN_LINUX_GNU_OPENSSL_INCLUDE_DIR=/usr/include
+            echo "Using cross-architecture libraries for ARM64"
+          else
+            export PKG_CONFIG_PATH=/usr/lib/pkgconfig
+            export AARCH64_UNKNOWN_LINUX_GNU_OPENSSL_LIB_DIR=/usr/lib
+            export AARCH64_UNKNOWN_LINUX_GNU_OPENSSL_INCLUDE_DIR=/usr/include
+            echo "Using native libraries for ARM64 cross-compilation"
           fi
-          export PKG_CONFIG_ALLOW_CROSS=1
-          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
         fi
-        cargo build --target ${{ matrix.target.triple }} --release --verbose
+
+        echo "Starting build..."
+        cargo build --target ${{ matrix.target }} --release --verbose
 
     - name: Create release artifacts
       run: |
-        cd target/${{ matrix.target.triple }}/release
-        tar -czf phaeton-${{ matrix.target.triple }}.tar.gz phaeton
+        echo "Creating release artifacts for ${{ matrix.name }}"
+        cd target/${{ matrix.target }}/release
+        tar -czf phaeton-${{ matrix.target }}.tar.gz phaeton
+        echo "Created phaeton-${{ matrix.target }}.tar.gz"
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: phaeton-${{ matrix.target.triple }}
-        path: target/${{ matrix.target.triple }}/release/phaeton-${{ matrix.target.triple }}.tar.gz
+        name: phaeton-${{ matrix.target }}
+        path: target/${{ matrix.target }}/release/phaeton-${{ matrix.target }}.tar.gz
         retention-days: 30
 
   macos-build:
