@@ -324,8 +324,6 @@ impl Default for LoggingConfig {
     }
 }
 
-
-
 impl Default for TibberConfig {
     fn default() -> Self {
         Self {
