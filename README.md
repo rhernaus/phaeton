@@ -63,6 +63,77 @@ cargo fmt --check
 
 # Run security audit
 cargo audit
+
+# Make build script executable
+chmod +x build.sh
+```
+
+### Cross-Compilation
+
+Phaeton supports cross-compilation for multiple architectures to run on different systems:
+
+#### Quick Build Script (Recommended)
+
+```bash
+# Build for all supported platforms
+./build.sh
+```
+
+This will create release binaries in the `dist/` directory for:
+- **Cerbo GX (ARM v7)**: `phaeton-armv7-unknown-linux-gnueabihf.tar.gz`
+- **Linux ARM64**: `phaeton-aarch64-unknown-linux-gnu.tar.gz`
+- **macOS ARM64**: `phaeton-macos-arm64.tar.gz`
+
+#### GitHub Actions CI (Recommended)
+
+The project includes GitHub Actions workflows that automatically build for all supported platforms:
+
+- **Cerbo GX (ARM v7)**: Cross-compiled with full OpenSSL support
+- **Linux ARM64**: Cross-compiled with full OpenSSL support
+- **macOS ARM64**: Native compilation
+
+Binaries are automatically created and uploaded as release artifacts.
+
+#### Manual Cross-Compilation
+
+```bash
+# Install cross-compilation targets
+rustup target add armv7-unknown-linux-gnueabihf
+rustup target add aarch64-unknown-linux-gnu
+
+# Install cross-compilation tools (macOS)
+brew tap messense/macos-cross-toolchains
+brew install aarch64-unknown-linux-gnu armv7-unknown-linux-gnueabihf
+
+# For Linux, install additional dependencies:
+# sudo apt-get install -y libssl-dev:armhf libssl-dev:arm64 pkg-config
+
+# Build for Cerbo GX
+cargo build --target armv7-unknown-linux-gnueabihf --release
+
+# Build for Linux ARM64
+cargo build --target aarch64-unknown-linux-gnu --release
+
+# Build for macOS (native)
+cargo build --release
+```
+
+#### Using Make
+
+```bash
+# Show all available targets
+make help
+
+# Cross-compile for specific targets
+make cross-build-armv7    # Cerbo GX (ARM v7)
+make cross-build-arm64    # Linux ARM64
+make build-macos          # macOS ARM64
+
+# Build all targets and create packages
+make package-release
+
+# Run all quality checks
+make quality
 ```
 
 ## Architecture
