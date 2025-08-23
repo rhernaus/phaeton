@@ -14,7 +14,7 @@ readme = "README.md"
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }
 tokio-util = "0.7"
-tokio-stream = "0.1"
+tokio-stream = { version = "0.1", features = ["sync"] }
 
 # Modbus TCP client
 tokio-modbus = { version = "0.16.1", features = ["tcp"] }
@@ -26,6 +26,7 @@ warp = { version = "0.4", features = ["server"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
 serde_json = "1.0"
+schemars = { version = "0.8", features = ["chrono", "url", "uuid"] }
 
 # Configuration
 config = "0.15"

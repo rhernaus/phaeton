@@ -13,7 +13,7 @@ use crate::modbus::{
 };
 use crate::persistence::PersistenceManager;
 use crate::session::ChargingSessionManager;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{broadcast, mpsc, watch};
 use tokio::time::{Duration, interval};
 
 /// Main driver state
@@ -84,6 +84,9 @@ pub struct AlfenDriver {
 
     /// Command sender (fan-out to subsystems like D-Bus, web if needed)
     commands_tx: mpsc::UnboundedSender<DriverCommand>,
+
+    /// Broadcast channel for streaming live status updates (SSE)
+    status_tx: broadcast::Sender<String>,
 }
 
 impl AlfenDriver {
@@ -143,6 +146,9 @@ impl AlfenDriver {
             intended_set_current = cur.max(0.0).min(config.controls.max_set_current);
         }
 
+        // Create status broadcast channel
+        let (status_tx, _status_rx) = broadcast::channel::<String>(100);
+
         Ok(Self {
             config,
             state: state_tx,
@@ -163,6 +169,7 @@ impl AlfenDriver {
             last_status: 0,
             commands_rx,
             commands_tx,
+            status_tx,
         })
     }
 
@@ -526,7 +533,25 @@ impl AlfenDriver {
                 l1_v, l2_v, l3_v, l1_i, l2_i, l3_i, l1_p, l2_p, l3_p, p_total, energy_kwh, status
             ));
 
-            // TODO: apply control logic and write set-current via Modbus
+            // Publish status snapshot for SSE consumers
+            let mut status_obj = serde_json::json!({
+                "mode": self.current_mode_code(),
+                "start_stop": self.start_stop_code(),
+                "set_current": self.get_intended_set_current(),
+                "station_max_current": self.get_station_max_current(),
+                "ac_power": p_total,
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            });
+            // Include session energy if available
+            if let Some(v) = self
+                .sessions
+                .get_session_stats()
+                .get("energy_delivered_kwh")
+                .and_then(|v| v.as_f64())
+            {
+                status_obj["energy_forward_kwh"] = serde_json::json!(v);
+            }
+            let _ = self.status_tx.send(status_obj.to_string());
         }
 
         self.logger.debug("Poll cycle completed");
@@ -587,6 +612,40 @@ impl AlfenDriver {
 
     pub fn get_db_value(&self, path: &str) -> Option<serde_json::Value> {
         self.dbus.as_ref().and_then(|d| d.get(path)).cloned()
+    }
+
+    /// Snapshot of cached D-Bus paths (subset of known keys)
+    pub fn get_dbus_cache_snapshot(&self) -> serde_json::Value {
+        let mut root = serde_json::Map::new();
+        for key in [
+            "/DeviceInstance",
+            "/ProductName",
+            "/FirmwareVersion",
+            "/Serial",
+            "/Ac/Power",
+            "/Ac/Energy/Forward",
+            "/Ac/Current",
+            "/Ac/PhaseCount",
+            "/Status",
+            "/Mode",
+            "/StartStop",
+            "/SetCurrent",
+        ] {
+            if let Some(v) = self.get_db_value(key) {
+                root.insert(key.to_string(), v);
+            }
+        }
+        serde_json::Value::Object(root)
+    }
+
+    /// Get sessions data
+    pub fn sessions_snapshot(&self) -> serde_json::Value {
+        self.sessions.get_state()
+    }
+
+    /// Subscribe to status updates (for SSE)
+    pub fn subscribe_status(&self) -> broadcast::Receiver<String> {
+        self.status_tx.subscribe()
     }
 }
 

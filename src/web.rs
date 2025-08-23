@@ -10,7 +10,9 @@ use serde_json::json;
 use std::net::IpAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 use warp::http::Method;
+use warp::sse::Event;
 use warp::{Filter, Rejection, Reply};
 
 /// Web server for Phaeton
@@ -80,6 +82,11 @@ impl WebServer {
 
         let index = warp::path::end().map(|| "Phaeton Alfen EV Charger Driver");
 
+        // Config schema endpoint
+        let get_schema = warp::path!("api" / "config" / "schema")
+            .and(warp::get())
+            .and_then(handle_get_config_schema);
+
         let get_config = warp::path!("api" / "config")
             .and(warp::get())
             .and(with_driver(driver.clone()))
@@ -98,21 +105,72 @@ impl WebServer {
             .and(warp::query::<TailParams>())
             .and_then(handle_logs_tail);
 
+        // Logs head endpoint
+        let logs_head = warp::path!("api" / "logs" / "head")
+            .and(warp::get())
+            .and(with_driver(driver.clone()))
+            .and(warp::query::<TailParams>())
+            .and_then(handle_logs_head);
+
+        // Logs download endpoint
+        let logs_download = warp::path!("api" / "logs" / "download")
+            .and(warp::get())
+            .and(with_driver(driver.clone()))
+            .and_then(handle_logs_download);
+
         // Static UI under /ui
         let ui_index = warp::path("ui")
             .and(warp::path::end())
             .and(warp::fs::file("./webui/index.html"));
         let ui_files = warp::path("ui").and(warp::fs::dir("./webui"));
 
+        // SSE events: live status stream
+        let events = warp::path!("api" / "events")
+            .and(warp::get())
+            .and(with_driver(driver.clone()))
+            .and_then(handle_events);
+
+        // Sessions endpoints
+        let sessions_state = warp::path!("api" / "sessions")
+            .and(warp::get())
+            .and(with_driver(driver.clone()))
+            .and_then(handle_sessions_state);
+
+        // D-Bus cached paths
+        let dbus_dump = warp::path!("api" / "dbus")
+            .and(warp::get())
+            .and(with_driver(driver.clone()))
+            .and_then(handle_dbus_dump);
+
+        // Update endpoints (status/check/apply)
+        let update_status = warp::path!("api" / "update" / "status")
+            .and(warp::get())
+            .and_then(handle_update_status);
+        let update_check = warp::path!("api" / "update" / "check")
+            .and(warp::post())
+            .and_then(handle_update_check);
+        let update_apply = warp::path!("api" / "update" / "apply")
+            .and(warp::post())
+            .and_then(handle_update_apply);
+
         status
             .or(post_mode)
             .or(post_startstop)
             .or(post_set_current)
+            .or(get_schema)
             .or(get_config)
             .or(put_config)
             .or(logs_tail)
+            .or(logs_head)
+            .or(logs_download)
             .or(ui_index)
             .or(ui_files)
+            .or(events)
+            .or(sessions_state)
+            .or(dbus_dump)
+            .or(update_status)
+            .or(update_check)
+            .or(update_apply)
             .or(index)
     }
 
@@ -210,6 +268,12 @@ async fn handle_get_config(
     Ok(warp::reply::json(&json))
 }
 
+async fn handle_get_config_schema() -> std::result::Result<impl Reply, Rejection> {
+    let schema = schemars::schema_for!(crate::config::Config);
+    let json = serde_json::to_value(&schema).unwrap_or(serde_json::json!({"error":"schema"}));
+    Ok(warp::reply::json(&json))
+}
+
 async fn handle_put_config(
     driver: Arc<Mutex<AlfenDriver>>,
     body: UpdateConfigBody,
@@ -273,4 +337,147 @@ async fn handle_logs_tail(
         }
     };
     Ok(resp)
+}
+
+async fn handle_logs_head(
+    driver: Arc<Mutex<AlfenDriver>>,
+    params: TailParams,
+) -> std::result::Result<impl Reply, Rejection> {
+    let (log_path, max_lines) = {
+        let drv = driver.lock().await;
+        (
+            drv.config().logging.file.clone(),
+            params.lines.unwrap_or(200).min(10_000),
+        )
+    };
+    let resp = match tokio::fs::read_to_string(&log_path).await {
+        Ok(contents) => {
+            let mut lines: Vec<&str> = contents.lines().collect();
+            if lines.len() > max_lines {
+                lines.truncate(max_lines);
+            }
+            let body = lines.join("\n");
+            let reply = warp::reply::with_header(body, "Content-Type", "text/plain; charset=utf-8");
+            reply.into_response()
+        }
+        Err(_) => {
+            warp::reply::with_status("Log file not available", warp::http::StatusCode::NOT_FOUND)
+                .into_response()
+        }
+    };
+    Ok(resp)
+}
+
+async fn handle_logs_download(
+    driver: Arc<Mutex<AlfenDriver>>,
+) -> std::result::Result<impl Reply, Rejection> {
+    let log_path = {
+        let drv = driver.lock().await;
+        drv.config().logging.file.clone()
+    };
+    let resp = match tokio::fs::read(&log_path).await {
+        Ok(bytes) => {
+            let reply = warp::reply::with_header(bytes, "Content-Type", "application/octet-stream");
+            reply.into_response()
+        }
+        Err(_) => {
+            warp::reply::with_status("Log file not available", warp::http::StatusCode::NOT_FOUND)
+                .into_response()
+        }
+    };
+    Ok(resp)
+}
+
+async fn handle_events(
+    driver: Arc<Mutex<AlfenDriver>>,
+) -> std::result::Result<impl Reply, Rejection> {
+    // Subscribe to driver's broadcast channel
+    let rx = {
+        let drv = driver.lock().await;
+        drv.subscribe_status()
+    };
+
+    let stream = BroadcastStream::new(rx).filter_map(|msg| match msg {
+        Ok(payload) => {
+            let ev: Event = Event::default().event("status").data(payload);
+            Some(Ok::<Event, std::convert::Infallible>(ev))
+        }
+        Err(_) => None,
+    });
+
+    Ok(warp::sse::reply(warp::sse::keep_alive().stream(stream)))
+}
+
+async fn handle_sessions_state(
+    driver: Arc<Mutex<AlfenDriver>>,
+) -> std::result::Result<impl Reply, Rejection> {
+    let drv = driver.lock().await;
+    let json = drv.sessions_snapshot();
+    Ok(warp::reply::json(&json))
+}
+
+async fn handle_dbus_dump(
+    driver: Arc<Mutex<AlfenDriver>>,
+) -> std::result::Result<impl Reply, Rejection> {
+    let drv = driver.lock().await;
+    let json = drv.get_dbus_cache_snapshot();
+    Ok(warp::reply::json(&json))
+}
+
+async fn handle_update_status() -> std::result::Result<impl Reply, Rejection> {
+    let updater = crate::updater::GitUpdater::new(
+        "https://github.com/your-org/phaeton".to_string(),
+        "main".to_string(),
+    );
+    let status = updater.get_status();
+    let json = serde_json::to_value(status).unwrap_or(serde_json::json!({"error":"status"}));
+    Ok(warp::reply::json(&json))
+}
+
+async fn handle_update_check() -> std::result::Result<impl Reply, Rejection> {
+    let mut updater = crate::updater::GitUpdater::new(
+        "https://github.com/your-org/phaeton".to_string(),
+        "main".to_string(),
+    );
+    let res = updater.check_for_updates().await;
+    match res {
+        Ok(status) => {
+            let json =
+                serde_json::to_value(status).unwrap_or(serde_json::json!({"error":"status"}));
+            Ok(warp::reply::with_status(
+                warp::reply::json(&json),
+                warp::http::StatusCode::OK,
+            ))
+        }
+        Err(e) => {
+            let json = serde_json::json!({"error": e.to_string()});
+            Ok(warp::reply::with_status(
+                warp::reply::json(&json),
+                warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+            ))
+        }
+    }
+}
+
+async fn handle_update_apply() -> std::result::Result<impl Reply, Rejection> {
+    let mut updater = crate::updater::GitUpdater::new(
+        "https://github.com/your-org/phaeton".to_string(),
+        "main".to_string(),
+    );
+    match updater.apply_updates().await {
+        Ok(_) => {
+            let json = serde_json::json!({"status":"ok"});
+            Ok(warp::reply::with_status(
+                warp::reply::json(&json),
+                warp::http::StatusCode::OK,
+            ))
+        }
+        Err(e) => {
+            let json = serde_json::json!({"error": e.to_string()});
+            Ok(warp::reply::with_status(
+                warp::reply::json(&json),
+                warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+            ))
+        }
+    }
 }
