@@ -20,6 +20,46 @@ A high-performance Rust implementation of the Alfen EV charger driver for Victro
 
 ## Quick Start
 
+### Download prebuilt binaries (recommended)
+
+Grab the latest binaries from [Releases](https://github.com/your-org/phaeton/releases):
+
+- **Cerbo GX (ARMv7)**: `phaeton-armv7-unknown-linux-gnueabihf.tar.gz`
+- **Linux ARM64**: `phaeton-aarch64-unknown-linux-gnu.tar.gz`
+- **macOS ARM64**: `phaeton-macos-arm64.tar.gz`
+
+Verify checksums (Linux):
+
+```bash
+curl -L -O https://github.com/your-org/phaeton/releases/download/<tag>/SHA256SUMS
+curl -L -O https://github.com/your-org/phaeton/releases/download/<tag>/phaeton-<artifact>.tar.gz
+sha256sum -c SHA256SUMS
+```
+
+Verify on macOS:
+
+```bash
+curl -L -O https://github.com/your-org/phaeton/releases/download/<tag>/SHA256SUMS
+curl -L -O https://github.com/your-org/phaeton/releases/download/<tag>/phaeton-macos-arm64.tar.gz
+shasum -a 256 phaeton-macos-arm64.tar.gz
+grep phaeton-macos-arm64.tar.gz SHA256SUMS
+```
+
+Install:
+
+```bash
+tar -xzf phaeton-<artifact>.tar.gz
+sudo install -m 0755 phaeton /usr/local/bin/phaeton
+```
+
+Run:
+
+```bash
+phaeton
+```
+
+Nightly builds are published to the rolling `nightly` prerelease for early testing.
+
 ### Prerequisites
 
 - Rust (stable) with 2024 edition
@@ -84,15 +124,9 @@ This will create release binaries in the `dist/` directory for:
 - **Linux ARM64**: `phaeton-aarch64-unknown-linux-gnu.tar.gz`
 - **macOS ARM64**: `phaeton-macos-arm64.tar.gz`
 
-#### GitHub Actions CI (Recommended)
+#### GitHub Actions CI
 
-The project includes GitHub Actions workflows that automatically build for all supported platforms:
-
-- **Cerbo GX (ARM v7)**: Cross-compiled with full OpenSSL support
-- **Linux ARM64**: Cross-compiled with full OpenSSL support
-- **macOS ARM64**: Native compilation
-
-Binaries are automatically created and uploaded as release artifacts.
+Tagging a version (e.g., `v0.1.0`) triggers a release build that uploads signed artifacts and checksums to [Releases](https://github.com/your-org/phaeton/releases). Pushes to `main` update the rolling `nightly` prerelease.
 
 #### Manual Cross-Compilation
 
