@@ -556,6 +556,13 @@ impl AlfenDriver {
         &self.config
     }
 
+    /// Update configuration safely (no hot-restart of subsystems yet)
+    pub fn update_config(&mut self, new_config: Config) -> Result<()> {
+        // Basic validation already expected by caller
+        self.config = new_config;
+        Ok(())
+    }
+
     /// Accessors for web/UI
     pub fn current_mode_code(&self) -> u8 {
         self.current_mode as u8
