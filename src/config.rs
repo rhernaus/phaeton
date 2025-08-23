@@ -49,12 +49,10 @@ pub struct Config {
     pub timezone: String,
 
     /// Vehicle integrations (optional) - omitted from JSON schema
-    #[serde(skip)]
     #[schemars(skip)]
     pub vehicle: Option<HashMap<String, serde_yaml::Value>>,
 
     /// Multiple vehicle configurations - omitted from JSON schema
-    #[serde(skip)]
     #[schemars(skip)]
     pub vehicles: Option<HashMap<String, serde_yaml::Value>>,
 }
