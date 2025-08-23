@@ -20,8 +20,7 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-modbus = { version = "0.16.1", features = ["tcp"] }
 
 # Web framework - using warp for now as it's more stable
-warp = { version = "0.4", features = ["server"] }
-axum = { version = "0.7", features = ["macros", "json", "http2", "tokio"] }
+axum = { version = "0.8", features = ["macros", "json", "http2", "tokio"] }
 tower = "0.4"
 tower-http = { version = "0.5", features = ["cors", "trace", "fs", "compression-br", "compression-gzip"] }
 
@@ -30,8 +29,8 @@ serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
 serde_json = "1.0"
 schemars = { version = "0.8", features = ["chrono", "url", "uuid"] }
-utoipa = { version = "4.2", features = ["axum_extras", "chrono", "uuid"] }
-utoipa-swagger-ui = { version = "7", features = ["axum"] }
+utoipa = { version = "5.4.0", features = ["axum_extras", "chrono", "uuid"] }
+utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
 
 # Configuration
 config = "0.15"

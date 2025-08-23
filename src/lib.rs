@@ -46,7 +46,6 @@ pub mod session;
 pub mod tibber;
 pub mod updater;
 pub mod vehicle;
-pub mod web;
 pub mod web_axum;
 
 // Re-export commonly used types

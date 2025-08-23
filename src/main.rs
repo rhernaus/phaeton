@@ -1,6 +1,5 @@
 use anyhow::Result;
 use phaeton::driver::{AlfenDriver, DriverCommand};
-use phaeton::web::WebServer;
 use phaeton::web_axum;
 use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc};
@@ -21,26 +20,12 @@ async fn main() -> Result<()> {
     // Share driver with web server
     let driver_arc = Arc::new(Mutex::new(driver));
 
-    // Spawn legacy warp web server (temporary during migration)
-    let web_driver = driver_arc.clone();
-    let web_task = tokio::spawn(async move {
-        let web = WebServer::new(web_driver.clone()).await.expect("web init");
-        // Use configured host/port
-        let (host, port) = {
-            let drv = web_driver.lock().await;
-            (drv.config().web.host.clone(), drv.config().web.port)
-        };
-        if let Err(e) = web.start(&host, port).await {
-            error!("Web server error: {}", e);
-        }
-    });
-
-    // Spawn Axum server (new API + OpenAPI)
+    // Spawn Axum server (API + OpenAPI)
     let axum_driver = driver_arc.clone();
     let axum_task = tokio::spawn(async move {
         let (host, port) = {
             let drv = axum_driver.lock().await;
-            (drv.config().web.host.clone(), drv.config().web.port + 1)
+            (drv.config().web.host.clone(), drv.config().web.port)
         };
         if let Err(e) = web_axum::serve(axum_driver.clone(), &host, port).await {
             error!("Axum server error: {}", e);
@@ -52,13 +37,11 @@ async fn main() -> Result<()> {
         Ok(_) => {
             info!("Driver shutdown complete");
             // Ensure web server task ends (it runs until process stops)
-            web_task.abort();
             axum_task.abort();
             Ok(())
         }
         Err(e) => {
             error!("Driver failed with error: {}", e);
-            web_task.abort();
             axum_task.abort();
             Err(anyhow::anyhow!("Driver error: {}", e))
         }
