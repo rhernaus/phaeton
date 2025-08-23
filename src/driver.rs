@@ -68,6 +68,8 @@ pub struct AlfenDriver {
     station_max_current: f32,
     last_sent_current: f32,
     last_current_set_time: std::time::Instant,
+    /// Last observed Victron-esque status (0=Disc,1=Conn,2=Charging)
+    last_status: u8,
 }
 
 impl AlfenDriver {
@@ -90,6 +92,40 @@ impl AlfenDriver {
 
         logger.info("Initializing Alfen driver");
 
+        // Initialize persistence and load any saved state (best-effort)
+        let mut persistence = PersistenceManager::new("/data/phaeton_state.json");
+        let _ = persistence.load();
+
+        // Initialize session manager and restore previous session state if available
+        let mut sessions = ChargingSessionManager::default();
+        if let Some(sess_state) = persistence.get_section("session") {
+            let _ = sessions.restore_state(sess_state);
+        }
+
+        // Restore control states from persistence
+        let mut current_mode = ChargingMode::Manual;
+        if let Some(mode_val) = persistence.get::<u32>("mode") {
+            current_mode = match mode_val {
+                1 => ChargingMode::Auto,
+                2 => ChargingMode::Scheduled,
+                _ => ChargingMode::Manual,
+            };
+        }
+
+        let mut start_stop = StartStopState::Stopped;
+        if let Some(ss) = persistence.get::<u32>("start_stop") {
+            start_stop = if ss == 1 {
+                StartStopState::Enabled
+            } else {
+                StartStopState::Stopped
+            };
+        }
+
+        let mut intended_set_current = 0.0f32;
+        if let Some(cur) = persistence.get::<f32>("set_current") {
+            intended_set_current = cur.max(0.0).min(config.controls.max_set_current);
+        }
+
         Ok(Self {
             config,
             state: state_tx,
@@ -97,16 +133,17 @@ impl AlfenDriver {
             logger,
             shutdown_tx,
             shutdown_rx,
-            persistence: PersistenceManager::new("/data/phaeton_state.json"),
-            sessions: ChargingSessionManager::default(),
+            persistence,
+            sessions,
             dbus: None,
             controls: ChargingControls::new(),
-            current_mode: ChargingMode::Manual,
-            start_stop: StartStopState::Stopped,
-            intended_set_current: 0.0,
+            current_mode,
+            start_stop,
+            intended_set_current,
             station_max_current: 32.0,
             last_sent_current: 0.0,
             last_current_set_time: std::time::Instant::now(),
+            last_status: 0,
         })
     }
 
@@ -321,13 +358,14 @@ impl AlfenDriver {
             };
             let energy_kwh = energy_wh / 1000.0;
 
-            let status = match status_regs {
+            let status_u8 = match status_regs {
                 Some(v) if v.len() >= 5 => {
                     let s = decode_string(&v[0..5], None).unwrap_or_default();
                     Self::map_alfen_status_to_victron(&s) as i32
                 }
                 _ => 0,
             };
+            let status = status_u8 as i32;
 
             // Control logic: compute effective current and write via Modbus if needed
             let now_secs = (std::time::SystemTime::now()
@@ -373,17 +411,37 @@ impl AlfenDriver {
                 }
             }
 
-            // Update session manager
+            // Session start/end detection based on status transitions
+            let prev_status = self.last_status;
+            let cur_status = status as u8;
+            if cur_status == 2 && prev_status != 2 && self.sessions.current_session.is_none() {
+                let _ = self.sessions.start_session(energy_kwh);
+            } else if cur_status != 2 && self.sessions.current_session.is_some() {
+                // End current session
+                if self.sessions.end_session(energy_kwh).is_ok() {
+                    // Apply simple static pricing if configured
+                    if self.config.pricing.source.to_lowercase() == "static"
+                        && let Some(ref last) = self.sessions.last_session
+                    {
+                        let cost =
+                            last.energy_delivered_kwh * self.config.pricing.static_rate_eur_per_kwh;
+                        self.sessions.set_cost_on_last_session(cost);
+                    }
+                }
+            }
+            self.last_status = cur_status;
+
+            // Update session metrics on each poll
             self.sessions.update(p_total, energy_kwh)?;
 
             // Persist minimal state snapshot (best-effort)
             self.persistence.set_mode(self.current_mode as u32);
             self.persistence.set_start_stop(self.start_stop as u32);
             self.persistence.set_set_current(self.intended_set_current);
-            // store session snapshot
+            // store full session state snapshot
             let _ = self
                 .persistence
-                .set_section("session", self.sessions.get_session_stats());
+                .set_section("session", self.sessions.get_state());
             let _ = self.persistence.save();
 
             // D-Bus metrics (stubbed store)
@@ -492,41 +550,41 @@ impl AlfenDriver {
 
 // Control callbacks for Mode/StartStop/SetCurrent updates (stub: call these from web API later)
 impl AlfenDriver {
-    pub fn set_mode(&mut self, mode: u8) {
+    pub async fn set_mode(&mut self, mode: u8) {
         self.current_mode = match mode {
             1 => ChargingMode::Auto,
             2 => ChargingMode::Scheduled,
             _ => ChargingMode::Manual,
         };
         if let Some(dbus) = &mut self.dbus {
-            let _ = futures::executor::block_on(dbus.update_path("/Mode", serde_json::json!(mode)));
+            let _ = dbus.update_path("/Mode", serde_json::json!(mode)).await;
         }
         self.persistence.set_mode(self.current_mode as u32);
         let _ = self.persistence.save();
     }
 
-    pub fn set_start_stop(&mut self, value: u8) {
+    pub async fn set_start_stop(&mut self, value: u8) {
         self.start_stop = if value == 1 {
             StartStopState::Enabled
         } else {
             StartStopState::Stopped
         };
         if let Some(dbus) = &mut self.dbus {
-            let _ = futures::executor::block_on(
-                dbus.update_path("/StartStop", serde_json::json!(value)),
-            );
+            let _ = dbus
+                .update_path("/StartStop", serde_json::json!(value))
+                .await;
         }
         self.persistence.set_start_stop(self.start_stop as u32);
         let _ = self.persistence.save();
     }
 
-    pub fn set_intended_current(&mut self, amps: f32) {
+    pub async fn set_intended_current(&mut self, amps: f32) {
         let clamped = amps.max(0.0).min(self.config.controls.max_set_current);
         self.intended_set_current = clamped;
         if let Some(dbus) = &mut self.dbus {
-            let _ = futures::executor::block_on(
-                dbus.update_path("/SetCurrent", serde_json::json!(clamped)),
-            );
+            let _ = dbus
+                .update_path("/SetCurrent", serde_json::json!(clamped))
+                .await;
         }
         self.persistence.set_set_current(self.intended_set_current);
         let _ = self.persistence.save();
