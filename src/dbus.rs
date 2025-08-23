@@ -16,12 +16,19 @@ use zbus::{Connection, Result as ZbusResult, names::WellKnownName};
 
 #[derive(Default)]
 struct EvChargerValues {
+    // Identity and metadata
+    device_instance: u32,
+    product_name: String,
+    firmware_version: String,
+    serial: String,
+    // Controls and measurements
     mode: u8,
     start_stop: u8,
     set_current: f64,
     ac_power: f64,
     ac_energy_forward: f64,
     ac_current: f64,
+    phase_count: u8,
     l1_voltage: f64,
     l2_voltage: f64,
     l3_voltage: f64,
@@ -32,6 +39,7 @@ struct EvChargerValues {
     l2_power: f64,
     l3_power: f64,
     status: u32,
+    charging_time: i64,
 }
 
 struct EvCharger {
@@ -42,6 +50,27 @@ struct EvCharger {
 
 #[zbus::interface(name = "com.victronenergy.evcharger")]
 impl EvCharger {
+    // Identity
+    #[zbus(property)]
+    fn device_instance(&self) -> u32 {
+        self.values.lock().unwrap().device_instance
+    }
+
+    #[zbus(property)]
+    fn product_name(&self) -> String {
+        self.values.lock().unwrap().product_name.clone()
+    }
+
+    #[zbus(property)]
+    fn firmware_version(&self) -> String {
+        self.values.lock().unwrap().firmware_version.clone()
+    }
+
+    #[zbus(property)]
+    fn serial(&self) -> String {
+        self.values.lock().unwrap().serial.clone()
+    }
+
     #[zbus(property)]
     fn mode(&self) -> u8 {
         self.values.lock().unwrap().mode
@@ -70,6 +99,11 @@ impl EvCharger {
     #[zbus(property)]
     fn ac_current(&self) -> f64 {
         self.values.lock().unwrap().ac_current
+    }
+
+    #[zbus(property)]
+    fn ac_phase_count(&self) -> u8 {
+        self.values.lock().unwrap().phase_count
     }
 
     #[zbus(property)]
@@ -114,6 +148,11 @@ impl EvCharger {
     #[zbus(property)]
     fn status(&self) -> u32 {
         self.values.lock().unwrap().status
+    }
+
+    #[zbus(property)]
+    fn charging_time(&self) -> i64 {
+        self.values.lock().unwrap().charging_time
     }
 
     // Property setters to control the driver
@@ -240,6 +279,30 @@ impl DbusService {
                 .map_err(|e| PhaetonError::dbus(format!("Get interface failed: {}", e)))?;
 
             match path {
+                "/DeviceInstance" => {
+                    if let Some(v) = value.as_u64() {
+                        let obj = iface.get_mut().await;
+                        obj.values.lock().unwrap().device_instance = v as u32;
+                    }
+                }
+                "/ProductName" => {
+                    if let Some(v) = value.as_str() {
+                        let obj = iface.get_mut().await;
+                        obj.values.lock().unwrap().product_name = v.to_string();
+                    }
+                }
+                "/FirmwareVersion" => {
+                    if let Some(v) = value.as_str() {
+                        let obj = iface.get_mut().await;
+                        obj.values.lock().unwrap().firmware_version = v.to_string();
+                    }
+                }
+                "/Serial" => {
+                    if let Some(v) = value.as_str() {
+                        let obj = iface.get_mut().await;
+                        obj.values.lock().unwrap().serial = v.to_string();
+                    }
+                }
                 "/Mode" => {
                     if let Some(v) = value.as_u64() {
                         let obj = iface.get_mut().await;
@@ -274,6 +337,12 @@ impl DbusService {
                     if let Some(v) = value.as_f64() {
                         let obj = iface.get_mut().await;
                         obj.values.lock().unwrap().ac_current = v;
+                    }
+                }
+                "/Ac/PhaseCount" => {
+                    if let Some(v) = value.as_u64() {
+                        let obj = iface.get_mut().await;
+                        obj.values.lock().unwrap().phase_count = v as u8;
                     }
                 }
                 "/Ac/L1/Voltage" => {
@@ -334,6 +403,15 @@ impl DbusService {
                     if let Some(v) = value.as_u64() {
                         let obj = iface.get_mut().await;
                         obj.values.lock().unwrap().status = v as u32;
+                    }
+                }
+                "/ChargingTime" => {
+                    if let Some(v) = value.as_i64() {
+                        let obj = iface.get_mut().await;
+                        obj.values.lock().unwrap().charging_time = v;
+                    } else if let Some(v) = value.as_u64() {
+                        let obj = iface.get_mut().await;
+                        obj.values.lock().unwrap().charging_time = v as i64;
                     }
                 }
                 _ => {}
