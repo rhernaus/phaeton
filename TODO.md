@@ -6,8 +6,9 @@ This project is a complete rewrite of the Python Alfen EV charger driver in Rust
 ## Current Status
 - **Project initialized**: ✅ Basic Rust project structure created
 - **Phase**: Foundation setup (Phase 1) - **COMPLETED** ✅
+- **Edition**: Migrated to Rust 2024 ✅
 - **Code Quality**: Clippy clean with zero warnings ✅
-- **CI/CD**: GitHub Actions and Dependabot configured ✅
+- **CI**: GitHub Actions configured; cross-compilation passing for ARMv7 and AArch64 ✅
 
 ## Project Structure
 ```
@@ -204,9 +205,9 @@ phaeton/
 # Phase 6: Deployment & Operations (Priority: Low) 🚧
 
 ## 6.1 Build System
-- [ ] **Configure cross-compilation** for ARM architecture
+- [x] **Configure cross-compilation** for ARM architecture
 - [ ] **Create Docker build** environment for consistent builds
-- [ ] **Implement CI/CD pipeline** with automated testing
+- [x] **Implement CI/CD pipeline** with automated testing
 - [ ] **Add binary packaging** for different target platforms
 
 ## 6.2 Monitoring & Observability
@@ -262,6 +263,8 @@ phaeton/
 10. ✅ Implement comprehensive error handling system
 11. ✅ Create all core modules with proper architecture
 12. ✅ Set up cross-compilation for Venus OS (ARM targets)
+13. ✅ Migrate project to Rust 2024 edition
+14. ✅ Vendor `git2`/OpenSSL to simplify cross-compilation
 
 ## Next Phase Ready
 **Phase 2: Core Communication & Control** - Ready to implement actual Modbus communication with hardware and complete the driver logic.
