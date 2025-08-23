@@ -5,10 +5,8 @@ updates:
     directory: "/"
     schedule:
       interval: "daily"
-      time: "04:00"
-      timezone: "UTC"
     open-pull-requests-limit: 10
-    target-branch: "feature/rust-foundation"
+    target-branch: "origin/main"
     commit-message:
       prefix: "deps"
       include: "scope"
@@ -16,42 +14,14 @@ updates:
       - "dependencies"
       - "rust"
       - "automated"
-    reviewers:
-      - "rhernaus"
-    assignees:
-      - "rhernaus"
-    groups:
-      # Group related dependencies to reduce PR noise
-      tokio-ecosystem:
-        patterns:
-          - "tokio"
-          - "tokio-*"
-      serde-ecosystem:
-        patterns:
-          - "serde"
-          - "serde_*"
-      tracing-ecosystem:
-        patterns:
-          - "tracing"
-          - "tracing-*"
-      warp-ecosystem:
-        patterns:
-          - "warp"
-          - "warp-*"
-    # Security updates get higher priority
-    vulnerability-alerts:
-      enabled: true
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "06:00"
-      timezone: "UTC"
+      interval: "daily"
     open-pull-requests-limit: 5
-    target-branch: "feature/rust-foundation"
+    target-branch: "origin/main"
     commit-message:
       prefix: "ci"
       include: "scope"
@@ -59,7 +29,3 @@ updates:
       - "dependencies"
       - "github-actions"
       - "automated"
-    reviewers:
-      - "rhernaus"
-    assignees:
-      - "rhernaus"
