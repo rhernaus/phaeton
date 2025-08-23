@@ -35,18 +35,18 @@
 //! - `updater`: Self-update functionality
 
 pub mod config;
+pub mod controls;
 pub mod dbus;
 pub mod driver;
 pub mod error;
 pub mod logging;
 pub mod modbus;
-// pub mod web; // Commented out due to warp compatibility issues
-pub mod controls;
 pub mod persistence;
 pub mod session;
 pub mod tibber;
 pub mod updater;
 pub mod vehicle;
+pub mod web;
 
 // Re-export commonly used types
 pub use config::Config;

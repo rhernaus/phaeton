@@ -1,99 +1,144 @@
 //! HTTP server and REST API for Phaeton
 //!
-//! This module provides the web interface including REST API endpoints
-//! and static file serving for the web UI.
+//! Provides endpoints for status and control operations.
 
-use warp::{Filter, Reply, Rejection, reject};
-use serde_json::json;
-use crate::error::{Result, PhaetonError};
+use crate::driver::AlfenDriver;
+use crate::error::Result;
 use crate::logging::get_logger;
+use serde::Deserialize;
+use serde_json::json;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use warp::{Filter, Rejection, Reply};
 
 /// Web server for Phaeton
 pub struct WebServer {
     logger: crate::logging::StructuredLogger,
+    driver: Arc<Mutex<AlfenDriver>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ModeBody {
+    mode: u8,
+}
+
+#[derive(Debug, Deserialize)]
+struct StartStopBody {
+    value: u8,
+}
+
+#[derive(Debug, Deserialize)]
+struct SetCurrentBody {
+    amps: f32,
 }
 
 impl WebServer {
     /// Create a new web server
-    pub async fn new() -> Result<Self> {
+    pub async fn new(driver: Arc<Mutex<AlfenDriver>>) -> Result<Self> {
         let logger = get_logger("web");
-
-        Ok(Self { logger })
+        Ok(Self { logger, driver })
     }
 
-    /// Create the routes
-    pub fn create_routes(&self) -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone {
+    /// Create the routes (static, do not capture &self lifetime)
+    pub fn create_routes_with_driver(
+        driver: Arc<Mutex<AlfenDriver>>,
+    ) -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone {
         let status = warp::path!("api" / "status")
             .and(warp::get())
-            .and_then(Self::handle_status);
+            .and(with_driver(driver.clone()))
+            .and_then(handle_status);
 
-        let get_config = warp::path!("api" / "config")
-            .and(warp::get())
-            .and_then(Self::handle_get_config);
+        let post_mode = warp::path!("api" / "mode")
+            .and(warp::post())
+            .and(with_driver(driver.clone()))
+            .and(warp::body::json())
+            .and_then(handle_mode);
 
-        let index = warp::path::end()
-            .map(|| "Phaeton Alfen EV Charger Driver");
+        let post_startstop = warp::path!("api" / "startstop")
+            .and(warp::post())
+            .and(with_driver(driver.clone()))
+            .and(warp::body::json())
+            .and_then(handle_startstop);
 
-        status.or(get_config).or(index)
+        let post_set_current = warp::path!("api" / "set_current")
+            .and(warp::post())
+            .and(with_driver(driver.clone()))
+            .and(warp::body::json())
+            .and_then(handle_set_current);
+
+        let index = warp::path::end().map(|| "Phaeton Alfen EV Charger Driver");
+
+        status
+            .or(post_mode)
+            .or(post_startstop)
+            .or(post_set_current)
+            .or(index)
     }
 
     /// Start the web server
     pub async fn start(self, host: &str, port: u16) -> Result<()> {
-        let routes = self.create_routes();
+        let routes = Self::create_routes_with_driver(self.driver.clone());
         let addr = format!("{}:{}", host, port);
 
-        self.logger.info(&format!("Starting web server on {}", addr));
+        self.logger
+            .info(&format!("Starting web server on {}", addr));
 
-        warp::serve(routes)
-            .run(([127, 0, 0, 1], port))
-            .await;
+        warp::serve(routes).run(([127, 0, 0, 1], port)).await;
 
         Ok(())
     }
+}
 
-    /// Handle status endpoint
-    async fn handle_status() -> Result<impl Reply, Rejection> {
-        // TODO: Get actual status from driver
-        let status = json!({
-            "mode": 0,
-            "start_stop": 0,
-            "set_current": 6.0,
-            "station_max_current": 32.0,
-            "status": 0,
-            "ac_current": 0.0,
-            "ac_power": 0.0,
-            "energy_forward_kwh": 0.0,
-            "l1_voltage": 230.0,
-            "l2_voltage": 230.0,
-            "l3_voltage": 230.0,
-            "l1_current": 0.0,
-            "l2_current": 0.0,
-            "l3_current": 0.0,
-            "active_phases": 3,
-            "charging_time_sec": 0,
-            "firmware": "Unknown",
-            "serial": "Unknown",
-            "product_name": "Alfen EV Charger",
-            "device_instance": 0
-        });
+fn with_driver(
+    driver: Arc<Mutex<AlfenDriver>>,
+) -> impl Filter<Extract = (Arc<Mutex<AlfenDriver>>,), Error = std::convert::Infallible> + Clone {
+    warp::any().map(move || driver.clone())
+}
 
-        Ok(warp::reply::json(&status))
+async fn handle_status(
+    driver: Arc<Mutex<AlfenDriver>>,
+) -> std::result::Result<impl Reply, Rejection> {
+    let drv = driver.lock().await;
+    let mut status = json!({
+        "mode": drv.current_mode_code(),
+        "start_stop": drv.start_stop_code(),
+        "set_current": drv.get_intended_set_current(),
+        "station_max_current": drv.get_station_max_current(),
+        "device_instance": drv.config().device_instance,
+    });
+    if let Some(v) = drv.get_db_value("/Ac/Power") {
+        status["ac_power"] = v;
     }
-
-    /// Handle get config endpoint
-    async fn handle_get_config() -> Result<impl Reply, Rejection> {
-        // TODO: Get actual config from driver
-        let config = json!({
-            "modbus": {
-                "ip": "192.168.1.100",
-                "port": 502,
-                "socket_slave_id": 1,
-                "station_slave_id": 200
-            },
-            "device_instance": 0,
-            "poll_interval_ms": 1000
-        });
-
-        Ok(warp::reply::json(&config))
+    if let Some(v) = drv.get_db_value("/Ac/Energy/Forward") {
+        status["energy_forward_kwh"] = v;
     }
+    Ok(warp::reply::json(&status))
+}
+
+async fn handle_mode(
+    driver: Arc<Mutex<AlfenDriver>>,
+    body: ModeBody,
+) -> std::result::Result<impl Reply, Rejection> {
+    let mut drv = driver.lock().await;
+    // Use driver's internal API directly; if desired, this could send via channel instead
+    drv.set_mode(body.mode).await;
+    Ok(warp::reply::with_status("OK", warp::http::StatusCode::OK))
+}
+
+async fn handle_startstop(
+    driver: Arc<Mutex<AlfenDriver>>,
+    body: StartStopBody,
+) -> std::result::Result<impl Reply, Rejection> {
+    let mut drv = driver.lock().await;
+    drv.set_start_stop(body.value).await;
+    Ok(warp::reply::with_status("OK", warp::http::StatusCode::OK))
+}
+
+async fn handle_set_current(
+    driver: Arc<Mutex<AlfenDriver>>,
+    body: SetCurrentBody,
+) -> std::result::Result<impl Reply, Rejection> {
+    let mut drv = driver.lock().await;
+    drv.set_intended_current(body.amps).await;
+    Ok(warp::reply::with_status("OK", warp::http::StatusCode::OK))
 }

@@ -16,7 +16,7 @@ A high-performance Rust implementation of the Alfen EV charger driver for Victro
 
 ## Status
 
-🚧 **Work in Progress**: This is a rewrite of the Python [victron-alfen-charger](https://github.com/your-org/victron-alfen-charger) project in Rust. Currently in Phase 1 (Foundation) of development.
+🚧 **Work in Progress**: This is a rewrite of the Python [victron-alfen-charger](https://github.com/your-org/victron-alfen-charger) project in Rust. Currently in Phase 2 (Core communication & control) – polling, MANUAL/AUTO/SCHEDULED control logic, session tracking + persistence, and D‑Bus via `zbus` (service registered; cached paths for now) are implemented. A basic web API is available (status + control), and the driver spawns the web server. CI builds and cross-compiles are configured.
 
 ## Quick Start
 
@@ -36,7 +36,7 @@ cd phaeton
 # Build the project
 cargo build --release
 
-# Run the driver
+# Run the driver (spawns web server at 127.0.0.1:8088)
 cargo run
 ```
 
@@ -105,13 +105,27 @@ rustup target add aarch64-unknown-linux-gnu
 brew tap messense/macos-cross-toolchains
 brew install aarch64-unknown-linux-gnu armv7-unknown-linux-gnueabihf
 
-# For Linux, install additional dependencies:
-# sudo apt-get install -y libssl-dev:armhf libssl-dev:arm64 pkg-config
+# For Linux (Ubuntu 24.04+), install cross toolchains and headers:
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends \
+  gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu \
+  libc6-dev-armhf-cross libc6-dev-arm64-cross \
+  pkg-config cmake make perl build-essential ca-certificates
 
-# Build for Cerbo GX
+# Build for Cerbo GX (ARMv7)
+export CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc
+export AR_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-ar
+export RANLIB_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-ranlib
+export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc
+export PKG_CONFIG_ALLOW_CROSS=1
 cargo build --target armv7-unknown-linux-gnueabihf --release
 
 # Build for Linux ARM64
+export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
+export AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar
+export RANLIB_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ranlib
+export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+export PKG_CONFIG_ALLOW_CROSS=1
 cargo build --target aarch64-unknown-linux-gnu --release
 
 # Build for macOS (native)
@@ -155,18 +169,24 @@ The application follows a modular architecture with clear separation of concerns
 
 ## API Documentation
 
-### REST API Endpoints
+### REST API Endpoints (available)
 
 - `GET /api/status` - Current system status
-- `GET /api/config` - Get configuration
-- `PUT /api/config` - Update configuration
 - `POST /api/mode` - Change charging mode
 - `POST /api/startstop` - Start/stop charging
 - `POST /api/set_current` - Set charging current
 
-### WebSocket Support
+### Planned Endpoints
 
-Real-time updates are available via WebSocket connections for live monitoring.
+- `GET /api/config` - Get configuration
+- `PUT /api/config` - Update configuration
+- `GET /api/config/schema` - Configuration schema
+- Update management endpoints (`/api/update/*`)
+- Logs endpoints (`/api/logs/*`)
+
+### WebSocket/SSE Support (planned)
+
+Real-time updates via WebSocket or Server-Sent Events for live monitoring.
 
 ## Configuration
 

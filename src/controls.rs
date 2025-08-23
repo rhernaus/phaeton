@@ -5,6 +5,8 @@
 
 use crate::error::Result;
 use crate::logging::get_logger;
+use chrono::{Datelike, Timelike, Utc};
+use chrono_tz::Tz;
 
 /// Charging mode enumeration
 #[derive(Debug, Clone, Copy)]
@@ -59,31 +61,86 @@ impl ChargingControls {
         requested_current: f32,
         station_max_current: f32,
         _current_time: f64,
-        _solar_power: Option<f32>,
-        _config: &crate::config::Config,
+        solar_power: Option<f32>,
+        config: &crate::config::Config,
     ) -> Result<f32> {
-        match (mode, start_stop) {
-            (_, StartStopState::Stopped) => Ok(0.0),
-
-            (ChargingMode::Manual, StartStopState::Enabled) => {
-                Ok(requested_current.min(station_max_current))
-            }
-
-            (ChargingMode::Auto, StartStopState::Enabled) => {
-                // TODO: Implement solar-based charging logic
-                Ok(requested_current.min(station_max_current))
-            }
-
-            (ChargingMode::Scheduled, StartStopState::Enabled) => {
-                // TODO: Implement schedule-based charging logic
-                Ok(requested_current.min(station_max_current))
-            }
+        if matches!(start_stop, StartStopState::Stopped) {
+            return Ok(0.0);
         }
+
+        let effective = match mode {
+            ChargingMode::Manual => requested_current.min(station_max_current),
+            ChargingMode::Auto => {
+                // Interpret solar_power as excess Watts available for charging.
+                // Convert Watts to Amps using nominal 230V per phase and assume 3 phases.
+                let excess_watts = solar_power.unwrap_or(0.0).max(0.0);
+                let nominal_voltage = 230.0f32;
+                let phases = 3.0f32; // TODO: detect active phases from charger
+                let amps = excess_watts / (phases * nominal_voltage);
+                // Ignore very small currents (<0.1 A)
+                let amps = if amps < 0.1 { 0.0 } else { amps };
+                amps.min(station_max_current)
+            }
+            ChargingMode::Scheduled => {
+                if Self::is_within_any_schedule(config) {
+                    station_max_current
+                } else {
+                    0.0
+                }
+            }
+        };
+
+        Ok(effective)
     }
 
     /// Apply current setting to charger
     pub async fn apply_current(&self, _current: f32, _explanation: &str) -> Result<bool> {
         // TODO: Implement actual current setting via Modbus
         Ok(true)
+    }
+
+    fn is_within_any_schedule(config: &crate::config::Config) -> bool {
+        let tz: Tz = config
+            .timezone
+            .parse()
+            .unwrap_or_else(|_| "UTC".parse().unwrap());
+        let now_utc = Utc::now();
+        let now_local = now_utc.with_timezone(&tz);
+        let weekday = now_local.weekday().num_days_from_monday() as u8; // 0..6
+        let minutes_now = now_local.hour() * 60 + now_local.minute();
+
+        for item in &config.schedule.items {
+            if !item.active {
+                continue;
+            }
+            if !item.days.is_empty() && !item.days.contains(&weekday) {
+                continue;
+            }
+            let start_min = Self::parse_hhmm(&item.start_time);
+            let end_min = Self::parse_hhmm(&item.end_time);
+            if start_min == end_min {
+                continue;
+            }
+            let overnight = start_min >= end_min;
+            let within = if overnight {
+                minutes_now >= start_min || minutes_now < end_min
+            } else {
+                minutes_now >= start_min && minutes_now < end_min
+            };
+            if within {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn parse_hhmm(s: &str) -> u32 {
+        let parts: Vec<&str> = s.split(':').collect();
+        if parts.len() != 2 {
+            return 0;
+        }
+        let h = parts[0].parse::<u32>().unwrap_or(0) % 24;
+        let m = parts[1].parse::<u32>().unwrap_or(0) % 60;
+        h * 60 + m
     }
 }

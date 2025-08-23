@@ -5,9 +5,9 @@
 
 use crate::config::LoggingConfig;
 use crate::error::{PhaetonError, Result};
-use tracing::{debug, error, info, trace, warn, Level};
+use tracing::{Level, debug, error, info, trace, warn};
 use tracing_appender::{non_blocking, rolling};
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
+use tracing_subscriber::{EnvFilter, Layer, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 /// Initialize logging system based on configuration
 pub fn init_logging(config: &LoggingConfig) -> Result<()> {

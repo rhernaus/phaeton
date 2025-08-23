@@ -191,14 +191,67 @@ impl ChargingSessionManager {
 
     /// Get session state for persistence
     pub fn get_state(&self) -> serde_json::Value {
-        // TODO: Implement state serialization
-        serde_json::Value::Null
+        let mut root = serde_json::Map::new();
+
+        if let Some(ref current) = self.current_session {
+            root.insert(
+                "current_session".to_string(),
+                serde_json::to_value(current).unwrap_or(serde_json::Value::Null),
+            );
+        } else {
+            root.insert("current_session".to_string(), serde_json::Value::Null);
+        }
+
+        if let Some(ref last) = self.last_session {
+            root.insert(
+                "last_session".to_string(),
+                serde_json::to_value(last).unwrap_or(serde_json::Value::Null),
+            );
+        } else {
+            root.insert("last_session".to_string(), serde_json::Value::Null);
+        }
+
+        // Persist a trimmed history (up to 10 most recent)
+        let history_len = self.session_history.len();
+        let start = history_len.saturating_sub(10);
+        let slice = &self.session_history[start..];
+        root.insert(
+            "history".to_string(),
+            serde_json::to_value(slice).unwrap_or(serde_json::Value::Null),
+        );
+
+        serde_json::Value::Object(root)
     }
 
     /// Restore session state from persistence
-    pub fn restore_state(&mut self, _state: serde_json::Value) -> Result<()> {
-        // TODO: Implement state restoration
+    pub fn restore_state(&mut self, state: serde_json::Value) -> Result<()> {
+        if let Some(obj) = state.as_object() {
+            if let Some(cur) = obj.get("current_session")
+                && !cur.is_null()
+                && let Ok(session) = serde_json::from_value::<ChargingSession>(cur.clone())
+            {
+                self.current_session = Some(session);
+            }
+            if let Some(last) = obj.get("last_session")
+                && !last.is_null()
+                && let Ok(session) = serde_json::from_value::<ChargingSession>(last.clone())
+            {
+                self.last_session = Some(session);
+            }
+            if let Some(hist) = obj.get("history")
+                && let Ok(history) = serde_json::from_value::<Vec<ChargingSession>>(hist.clone())
+            {
+                self.session_history = history.into_iter().take(self.max_history_size).collect();
+            }
+        }
         Ok(())
+    }
+
+    /// Set cost on the last completed session (if available)
+    pub fn set_cost_on_last_session(&mut self, cost: f64) {
+        if let Some(ref mut last) = self.last_session {
+            last.cost = Some(cost);
+        }
     }
 }
 

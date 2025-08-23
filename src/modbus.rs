@@ -7,6 +7,7 @@
 use crate::config::ModbusConfig;
 use crate::error::{PhaetonError, Result};
 use crate::logging::get_logger;
+use futures::future::BoxFuture;
 use std::time::Duration;
 use tokio::time::{sleep, timeout};
 use tokio_modbus::client::tcp;
@@ -105,6 +106,8 @@ impl ModbusClient {
         ));
 
         let client = self.get_client()?;
+        // Set the slave/unit id for this request
+        client.set_slave(slave_id.into());
         let request = client.read_holding_registers(address, count);
 
         match timeout(timeout_duration, request).await {
@@ -145,6 +148,7 @@ impl ModbusClient {
         ));
 
         let client = self.get_client()?;
+        client.set_slave(slave_id.into());
         let request = client.write_single_register(address, value);
 
         match timeout(timeout_duration, request).await {
@@ -183,6 +187,7 @@ impl ModbusClient {
         ));
 
         let client = self.get_client()?;
+        client.set_slave(slave_id.into());
         let request = client.write_multiple_registers(address, values);
 
         match timeout(timeout_duration, request).await {
@@ -317,26 +322,25 @@ impl ModbusConnectionManager {
     }
 
     /// Execute a Modbus operation with automatic reconnection
-    pub async fn execute_with_reconnect<F, Fut, T>(&mut self, operation: F) -> Result<T>
+    pub async fn execute_with_reconnect<F, T>(&mut self, mut operation: F) -> Result<T>
     where
-        F: Fn(&mut ModbusClient) -> Fut,
-        Fut: std::future::Future<Output = Result<T>>,
+        for<'a> F: FnMut(&'a mut ModbusClient) -> BoxFuture<'a, Result<T>>,
     {
         let mut attempts = 0;
 
         loop {
             // Ensure we're connected
-            if !self.client.is_connected() {
-                if let Err(e) = self.client.connect().await {
-                    attempts += 1;
-                    if attempts >= self.max_retry_attempts {
-                        return Err(e);
-                    }
-                    self.logger
-                        .warn(&format!("Connection attempt {} failed: {}", attempts, e));
-                    sleep(self.retry_delay).await;
-                    continue;
+            if !self.client.is_connected()
+                && let Err(e) = self.client.connect().await
+            {
+                attempts += 1;
+                if attempts >= self.max_retry_attempts {
+                    return Err(e);
                 }
+                self.logger
+                    .warn(&format!("Connection attempt {} failed: {}", attempts, e));
+                sleep(self.retry_delay).await;
+                continue;
             }
 
             // Execute the operation
