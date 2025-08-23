@@ -141,7 +141,7 @@ phaeton/
 - [ ] **Implement Victron energy rate detection** from system D-Bus
 
 ## 3.2 Web Server & API
-- [x] **Decide web framework**: migrated to `axum`
+- [x] **Migrate web framework**: fully migrated from `warp` to `axum` (no legacy code)
 - [x] **Create REST API endpoints** (initial set):
   - `GET /api/status` - Current system status
   - `POST /api/mode` - Mode switching
@@ -150,10 +150,10 @@ phaeton/
   - `GET /api/config` - Get configuration
   - `PUT /api/config` - Update configuration
 - [x] **Add remaining endpoints** for updates, logs, schema
-- [x] **Serve static UI** under `/ui` (web assets)
+- [x] **Serve static UI** under `/ui` (alias `/app`) (web assets)
 - [x] **Implement real-time updates** via SSE (`GET /api/events`)
 - [x] **Add CORS middleware** for local development
-- [x] **Create API documentation** with OpenAPI/Swagger (OpenAPI at `/openapi.json`, Swagger UI at `/ui/openapi`)
+- [x] **Create API documentation** with OpenAPI/Swagger (OpenAPI at `/openapi.json`, Swagger UI at `/docs`)
 
 ---
 

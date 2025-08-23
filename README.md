@@ -226,7 +226,11 @@ The application follows a modular architecture with clear separation of concerns
 ### OpenAPI / Swagger
 
 - OpenAPI JSON: `/openapi.json`
-- Swagger UI: `/ui/openapi`
+- Swagger UI: `/docs`
+
+### Static Web UI
+
+- UI assets are served under `/ui` (and `/app` as an alias for compatibility)
 
 ## Configuration
 
