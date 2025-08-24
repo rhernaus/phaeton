@@ -26,7 +26,7 @@ Grab the latest binaries from [Releases](https://github.com/your-org/phaeton/rel
 
 - **Cerbo GX (ARMv7)**: `phaeton-v<version>-armv7-unknown-linux-gnueabihf.tar.gz`
 - **Linux ARM64**: `phaeton-v<version>-aarch64-unknown-linux-gnu.tar.gz`
-- **macOS ARM64**: `phaeton-v<version>-macos-arm64.tar.gz`
+- **Linux AMD64**: `phaeton-v<version>-x86_64-unknown-linux-gnu.tar.gz`
 
 Verify checksums (Linux):
 
@@ -36,13 +36,13 @@ curl -L -O https://github.com/your-org/phaeton/releases/download/<tag>/phaeton-v
 sha256sum -c SHA256SUMS
 ```
 
-Verify on macOS:
+Verify on Linux AMD64:
 
 ```bash
 curl -L -O https://github.com/your-org/phaeton/releases/download/<tag>/SHA256SUMS
-curl -L -O https://github.com/your-org/phaeton/releases/download/<tag>/phaeton-v<version>-macos-arm64.tar.gz
-shasum -a 256 phaeton-v<version>-macos-arm64.tar.gz
-grep phaeton-v<version>-macos-arm64.tar.gz SHA256SUMS
+curl -L -O https://github.com/your-org/phaeton/releases/download/<tag>/phaeton-v<version>-x86_64-unknown-linux-gnu.tar.gz
+sha256sum phaeton-v<version>-x86_64-unknown-linux-gnu.tar.gz
+grep phaeton-v<version>-x86_64-unknown-linux-gnu.tar.gz SHA256SUMS
 ```
 
 Install:
@@ -85,9 +85,15 @@ cargo run
 Copy the sample configuration and edit as needed:
 
 ```bash
-cp alfen_driver_config.sample.yaml alfen_driver_config.yaml
+cp phaeton_config.sample.yaml phaeton_config.yaml
 # Edit the configuration file with your settings
 ```
+
+Phaeton will automatically look for a configuration file at the following locations, in order:
+
+- `./phaeton_config.yaml`
+- `/data/phaeton_config.yaml`
+- `/etc/phaeton/config.yaml`
 
 ### Development
 
@@ -122,7 +128,7 @@ Phaeton supports cross-compilation for multiple architectures to run on differen
 This will create release binaries in the `dist/` directory for:
 - **Cerbo GX (ARM v7)**: `phaeton-v<version>-armv7-unknown-linux-gnueabihf.tar.gz`
 - **Linux ARM64**: `phaeton-v<version>-aarch64-unknown-linux-gnu.tar.gz`
-- **macOS ARM64**: `phaeton-v<version>-macos-arm64.tar.gz`
+- **Linux AMD64**: `phaeton-v<version>-x86_64-unknown-linux-gnu.tar.gz`
 
 #### GitHub Actions CI
 
@@ -162,8 +168,8 @@ export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
 export PKG_CONFIG_ALLOW_CROSS=1
 cargo build --target aarch64-unknown-linux-gnu --release
 
-# Build for macOS (native)
-cargo build --release
+# Build for Linux AMD64 (native or cross)
+cargo build --target x86_64-unknown-linux-gnu --release
 ```
 
 #### Using Make
@@ -175,7 +181,7 @@ make help
 # Cross-compile for specific targets
 make cross-build-armv7    # Cerbo GX (ARM v7)
 make cross-build-arm64    # Linux ARM64
-make build-macos          # macOS ARM64
+make cross-build-amd64    # Linux AMD64
 
 # Build all targets and create packages
 make package-release
@@ -238,7 +244,7 @@ The application uses YAML configuration with the following main sections:
 
 ```yaml
 modbus:
-  ip: "192.168.1.100"
+  ip: "10.128.0.64"
   port: 502
   socket_slave_id: 1
   station_slave_id: 200

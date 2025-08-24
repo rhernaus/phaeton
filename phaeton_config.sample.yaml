@@ -1,0 +1,78 @@
+modbus:
+  ip: "10.128.0.64"
+  port: 502
+  socket_slave_id: 1
+  station_slave_id: 200
+
+device_instance: 0
+
+registers:
+  voltages: 306
+  currents: 320
+  power: 344
+  energy: 374
+  status: 1201
+  amps_config: 1210
+  phases: 1215
+  firmware_version: 123
+  firmware_version_count: 17
+  station_serial: 157
+  station_serial_count: 11
+  manufacturer: 117
+  manufacturer_count: 5
+  platform_type: 140
+  platform_type_count: 17
+  station_max_current: 1100
+  station_status: 1201
+
+defaults:
+  intended_set_current: 6.0
+  station_max_current: 32.0
+
+logging:
+  level: "INFO"
+  file: "/var/log/phaeton.log"
+  format: "structured"
+  max_file_size_mb: 10
+  backup_count: 5
+  console_output: true
+  json_format: false
+
+schedule:
+  items: []
+
+tibber:
+  access_token: ""
+  enabled: false
+  home_id: ""
+  charge_on_cheap: true
+  charge_on_very_cheap: true
+  strategy: "level"
+  max_price_total: 0.0
+  cheap_percentile: 0.3
+
+controls:
+  current_tolerance: 0.5
+  update_difference_threshold: 0.1
+  verification_delay: 0.1
+  retry_delay: 0.5
+  max_retries: 3
+  watchdog_interval_seconds: 30
+  max_set_current: 64.0
+  min_charge_duration_seconds: 300
+  current_update_interval: 30000
+  verify_delay: 100
+
+web:
+  host: "127.0.0.1"
+  port: 8088
+
+pricing:
+  source: "static"
+  static_rate_eur_per_kwh: 0.25
+  currency_symbol: "€"
+
+poll_interval_ms: 1000
+timezone: "UTC"
+
+

@@ -13,7 +13,7 @@ env:
 
 jobs:
   build-linux:
-    name: Build Linux (armv7, aarch64)
+    name: Build Linux (armv7, aarch64, x86_64)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -26,7 +26,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu \
+            gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu gcc \
             libc6-dev-armhf-cross libc6-dev-arm64-cross \
             pkg-config cmake make perl build-essential ca-certificates
 
@@ -34,6 +34,7 @@ jobs:
         run: |
           rustup target add armv7-unknown-linux-gnueabihf
           rustup target add aarch64-unknown-linux-gnu
+          rustup target add x86_64-unknown-linux-gnu
 
       - name: Build (armv7)
         env:
@@ -55,11 +56,17 @@ jobs:
         run: |
           cargo build --target aarch64-unknown-linux-gnu --release --verbose
 
+      - name: Build (x86_64)
+        run: |
+          cargo build --target x86_64-unknown-linux-gnu --release --verbose
+
       - name: Package artifacts
         run: |
           mkdir -p dist
-          tar -czf dist/phaeton-armv7-unknown-linux-gnueabihf.tar.gz -C target/armv7-unknown-linux-gnueabihf/release phaeton
-          tar -czf dist/phaeton-aarch64-unknown-linux-gnu.tar.gz -C target/aarch64-unknown-linux-gnu/release phaeton
+          VERSION=$(grep -m1 '^version\s*=\s*"' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
+          tar -czf dist/phaeton-v${VERSION}-armv7-unknown-linux-gnueabihf.tar.gz -C target/armv7-unknown-linux-gnueabihf/release phaeton
+          tar -czf dist/phaeton-v${VERSION}-aarch64-unknown-linux-gnu.tar.gz -C target/aarch64-unknown-linux-gnu/release phaeton
+          tar -czf dist/phaeton-v${VERSION}-x86_64-unknown-linux-gnu.tar.gz -C target/x86_64-unknown-linux-gnu/release phaeton
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -67,46 +74,17 @@ jobs:
           name: linux-binaries
           path: dist/*.tar.gz
 
-  build-macos:
-    name: Build macOS (arm64)
-    runs-on: macos-14
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build
-        run: |
-          cargo build --release --verbose
-
-      - name: Package artifact
-        run: |
-          mkdir -p dist
-          tar -czf dist/phaeton-macos-arm64.tar.gz -C target/release phaeton
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-binary
-          path: dist/*.tar.gz
 
   publish:
     name: Create GitHub Release and upload assets
     runs-on: ubuntu-latest
-    needs: [build-linux, build-macos]
+    needs: [build-linux]
     steps:
       - name: Download Linux artifacts
         uses: actions/download-artifact@v4
         with:
           name: linux-binaries
-          path: dist
-
-      - name: Download macOS artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: macos-binary
           path: dist
 
       - name: Generate checksums
@@ -119,9 +97,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/phaeton-armv7-unknown-linux-gnueabihf.tar.gz
-            dist/phaeton-aarch64-unknown-linux-gnu.tar.gz
-            dist/phaeton-macos-arm64.tar.gz
+            dist/phaeton-v*-armv7-unknown-linux-gnueabihf.tar.gz
+            dist/phaeton-v*-aarch64-unknown-linux-gnu.tar.gz
+            dist/phaeton-v*-x86_64-unknown-linux-gnu.tar.gz
             dist/SHA256SUMS
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-rc') }}

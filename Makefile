@@ -1,4 +1,4 @@
-.PHONY: all build clean test lint format release help cross-build-armv7 cross-build-arm64 build-macos install-deps check
+.PHONY: all build clean test lint format release help cross-build-armv7 cross-build-arm64 cross-build-amd64 install-deps check package-release
 
 # Default target
 all: check test build
@@ -58,30 +58,33 @@ cross-build-arm64: install-cross-deps
 	@cargo build --target aarch64-unknown-linux-gnu --release --verbose
 	@echo "Binary available at: target/aarch64-unknown-linux-gnu/release/phaeton"
 
-# Build for macOS ARM64 (native)
-build-macos:
-	@echo "Building for macOS ARM64..."
-	@cargo build --release --verbose
-	@echo "Binary available at: target/release/phaeton"
+# Cross-compile for Linux AMD64
+cross-build-amd64: install-cross-deps
+	@echo "Cross-compiling for Linux AMD64..."
+	@cargo build --target x86_64-unknown-linux-gnu --release --verbose
+	@echo "Binary available at: target/x86_64-unknown-linux-gnu/release/phaeton"
 
 # Install cross-compilation dependencies (Linux/macOS)
 install-cross-deps:
 	@echo "Installing cross-compilation tools..."
 	@if command -v apt-get >/dev/null 2>&1; then \
 		sudo apt-get update && \
-		sudo apt-get install -y gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu; \
+		sudo apt-get install -y gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu gcc-x86-64-linux-gnu; \
 	elif command -v brew >/dev/null 2>&1; then \
 		brew tap messense/macos-cross-toolchains && \
 		brew install aarch64-unknown-linux-gnu && \
-		brew install armv7-unknown-linux-gnueabihf; \
+		brew install armv7-unknown-linux-gnueabihf && \
+		brew install x86_64-unknown-linux-gnu; \
 	else \
 		echo "Please install cross-compilation tools manually for your system"; \
 		exit 1; \
 	fi
 	@echo "Cross-compilation tools installed successfully"
 
-# Create release artifacts for all targets
-package-release: cross-build-armv7 cross-build-arm64 build-macos
+# Create release artifacts for all targets (parallel builds)
+package-release: install-cross-deps
+	@echo "Building all targets in parallel..."
+	@$(MAKE) -j3 cross-build-armv7 cross-build-arm64 cross-build-amd64
 	@echo "Creating release packages..."
 	@mkdir -p dist
 	@VERSION=$${PHAETON_VERSION:-$$(grep -m1 '^version\s*=\s*"' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')} ; \\
@@ -99,9 +102,9 @@ package-release: cross-build-armv7 cross-build-arm64 build-macos
 		tar -czf phaeton-v$$VERSION-aarch64-unknown-linux-gnu.tar.gz phaeton && \\
 		mv phaeton-v$$VERSION-aarch64-unknown-linux-gnu.tar.gz ../../../dist/ ; \\
 	cd - >/dev/null ; \\
-	cd target/release && \\
-		tar -czf phaeton-v$$VERSION-macos-arm64.tar.gz phaeton && \\
-		mv phaeton-v$$VERSION-macos-arm64.tar.gz ../../../dist/ ; \\
+	cd target/x86_64-unknown-linux-gnu/release && \\
+		tar -czf phaeton-v$$VERSION-x86_64-unknown-linux-gnu.tar.gz phaeton && \\
+		mv phaeton-v$$VERSION-x86_64-unknown-linux-gnu.tar.gz ../../../dist/ ; \\
 	cd - >/dev/null ; \\
 	echo "Release packages created in dist/ directory (version $$VERSION)"
 
@@ -127,7 +130,7 @@ help:
 	@echo "  clean              - Clean build artifacts"
 	@echo "  cross-build-armv7  - Cross-compile for Cerbo GX (ARM v7)"
 	@echo "  cross-build-arm64  - Cross-compile for Linux ARM64"
-	@echo "  build-macos        - Build for macOS ARM64"
+	@echo "  cross-build-amd64  - Cross-compile for Linux AMD64"
 	@echo "  install-cross-deps - Install cross-compilation tools"
 	@echo "  package-release    - Create release packages for all targets"
 	@echo "  audit              - Run security audit"

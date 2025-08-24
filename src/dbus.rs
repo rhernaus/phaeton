@@ -197,7 +197,7 @@ impl DbusService {
         let logger = get_logger("dbus");
         logger.info("Initializing D-Bus service (zbus)");
 
-        let service_name = format!("com.victronenergy.evcharger.alfen_{}", device_instance);
+        let service_name = format!("com.victronenergy.evcharger.phaeton_{}", device_instance);
 
         let charger_path = OwnedObjectPath::try_from("/")
             .map_err(|e| PhaetonError::dbus(format!("Invalid object path: {}", e)))?;
