@@ -350,10 +350,40 @@ pub async fn serve(driver: Arc<Mutex<AlfenDriver>>, host: &str, port: u16) -> an
     let state = AppState { driver };
     let router = build_router(state);
 
-    let addr: SocketAddr = match host.parse::<IpAddr>() {
-        Ok(ip) => SocketAddr::new(ip, port),
-        Err(_) => ([127, 0, 0, 1], port).into(),
+    // Structured logs for web server startup and binding
+    let logger = crate::logging::get_logger("web");
+    {
+        let msg = format!(
+            "Starting web server; requested host={}, port={}",
+            host, port
+        );
+        logger.info(&msg);
+    }
+
+    let (addr, parsed_ok): (SocketAddr, bool) = match host.parse::<IpAddr>() {
+        Ok(ip) => (SocketAddr::new(ip, port), true),
+        Err(_) => (([127, 0, 0, 1], port).into(), false),
     };
-    axum::serve(tokio::net::TcpListener::bind(addr).await?, router).await?;
+    if !parsed_ok {
+        let warn_msg = format!("Invalid host '{}'; falling back to 127.0.0.1", host);
+        logger.warn(&warn_msg);
+    }
+    {
+        let bind_msg = format!("Binding web server to {}:{}", addr.ip(), addr.port());
+        logger.info(&bind_msg);
+    }
+
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let local_addr = listener.local_addr()?;
+    {
+        let listen_msg = format!(
+            "Web server listening at http://{}:{} (UI /ui, API /api, docs /docs)",
+            local_addr.ip(),
+            local_addr.port()
+        );
+        logger.info(&listen_msg);
+    }
+
+    axum::serve(listener, router).await?;
     Ok(())
 }

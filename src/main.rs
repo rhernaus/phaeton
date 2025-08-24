@@ -27,6 +27,12 @@ async fn main() -> Result<()> {
             let drv = axum_driver.lock().await;
             (drv.config().web.host.clone(), drv.config().web.port)
         };
+        // Log the selected host/port before starting web server
+        {
+            let logger = phaeton::logging::get_logger("web");
+            let msg = format!("Configured web bind address: host={}, port={}", host, port);
+            logger.info(&msg);
+        }
         if let Err(e) = web::serve(axum_driver.clone(), &host, port).await {
             error!("Axum server error: {}", e);
         }

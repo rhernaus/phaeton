@@ -571,10 +571,8 @@ impl AlfenDriver {
             let requested = self.intended_set_current;
 
             // Calculate PV excess power from Victron system (AC+DC PV minus AC loads excluding EV charger itself)
-            let excess_pv_power_w: f32 = match self.calculate_excess_pv_power(p_total).await {
-                Some(v) => v,
-                None => 0.0,
-            };
+            let excess_pv_power_w: f32 =
+                self.calculate_excess_pv_power(p_total).await.unwrap_or(0.0);
             let effective: f32 = self
                 .controls
                 .compute_effective_current(
@@ -838,8 +836,15 @@ impl AlfenDriver {
         let dbus = self.dbus.as_ref()?;
         // Helper to read f64, defaulting to 0
         async fn get_f64(svc: &crate::dbus::DbusService, path: &str) -> f64 {
-            match svc.read_remote_value("com.victronenergy.system", path).await {
-                Ok(v) => v.as_f64().or_else(|| v.as_i64().map(|x| x as f64)).or_else(|| v.as_u64().map(|x| x as f64)).unwrap_or(0.0),
+            match svc
+                .read_remote_value("com.victronenergy.system", path)
+                .await
+            {
+                Ok(v) => v
+                    .as_f64()
+                    .or_else(|| v.as_i64().map(|x| x as f64))
+                    .or_else(|| v.as_u64().map(|x| x as f64))
+                    .unwrap_or(0.0),
                 Err(_) => 0.0,
             }
         }
