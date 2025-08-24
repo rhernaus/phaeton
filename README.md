@@ -4,15 +4,24 @@ A high-performance EV charger driver for Victron Venus OS, providing seamless in
 
 ## Features
 
+### Implemented
+
 - **High Performance**: Async-first design with Tokio runtime
 - **Memory Safe**: Rust's ownership system prevents common bugs
-- **Modbus TCP**: Direct communication with EV chargers
-- **D-Bus Integration**: Full Venus OS compatibility
-- **Web Interface**: REST API and static file serving (Axum)
-- **Dynamic Pricing**: Tibber API integration for smart charging
-- **Vehicle Integration**: Tesla and Kia API support
-- **Self-Updates**: Git-based automatic updates
-- **Configuration**: YAML-based configuration with validation
+- **Modbus TCP**: Async client with reconnect/backoff and decoding utilities
+- **Web Interface**: Axum REST API, SSE events, logs endpoints; static UI served under `/ui` and `/app`; OpenAPI at `/openapi.json` and Swagger UI at `/docs`
+- **D-Bus Integration (partial)**: Service registration and `com.victronenergy.BusItem` exposure for core paths; writable controls map to driver commands
+- **Sessions & Persistence**: Session tracking, stats, and persistence across restarts; optional static pricing for session cost
+- **Configuration**: YAML configuration with validation; schema exposed at `/api/config/schema`
+- **Logging**: Structured logging with rotation; context-rich tracing
+
+### Planned / In progress
+
+- **Dynamic Pricing (Tibber)**: API client and pricing strategies
+- **Vehicle Integration**: Tesla and Kia clients
+- **Self-Updates**: Git-based update check/apply
+- **D-Bus**: Export full object tree and broader Venus OS parity
+- **Security**: Authentication/authorization and rate limiting for the web API
 
 ## Quick Start
 
@@ -92,6 +101,8 @@ Phaeton will automatically look for a configuration file at the following locati
 - `/data/phaeton_config.yaml`
 - `/etc/phaeton/config.yaml`
 
+You can also retrieve the JSON schema via the API at `/api/config/schema`.
+
 ### Development
 
 ```bash
@@ -108,6 +119,30 @@ cargo fmt --check
 cargo audit
 ```
 
+#### Developing on macOS/Linux with remote D-Bus (Cerbo GX)
+
+By design, D-Bus is local IPC. Victron Venus OS does not expose the system bus over TCP. For development, you can forward the Cerbo GX system bus over SSH and run Phaeton on your workstation.
+
+1) Forward the system bus socket to your machine:
+
+```bash
+ssh -N \
+  -L /tmp/venus-system-bus:/var/run/dbus/system_bus_socket \
+  root@<cerbo-ip>
+```
+
+2) Point Phaeton to the forwarded system bus and allow startup:
+
+```bash
+export DBUS_SYSTEM_BUS_ADDRESS=unix:path=/tmp/venus-system-bus
+export ZBUS_SYSTEM_BUS_ADDRESS=unix:path=/tmp/venus-system-bus
+
+# Option A (recommended): keep require_dbus: true in config
+# Option B (temporary): set require_dbus: false in phaeton_config.yaml for local testing
+```
+
+Security note: only use SSH forwarding on trusted networks. Do not expose D-Bus directly via TCP.
+
 ### Cross-Compilation
 
 Phaeton supports cross-compilation for multiple architectures to run on different systems:
@@ -122,7 +157,7 @@ cargo build --release
 
 #### GitHub Actions CI
 
-Tagging a version (e.g., `v0.1.0`) triggers a release build that uploads signed artifacts and checksums to [Releases](https://github.com/rhernaus/phaeton/releases). Pushes to `main` update the rolling `nightly` prerelease.
+Tagging a version (e.g., `v0.1.0`) triggers a release build that uploads signed artifacts and checksums to [Releases](https://github.com/rhernaus/phaeton/releases). Pushes to `main` update the rolling `nightly` prerelease. CI workflows live under `.github/workflows/` and cover testing, linting, security audit, cross-compilation, and release publishing.
 
 #### Manual Cross-Compilation
 
@@ -163,6 +198,13 @@ cargo build --target x86_64-unknown-linux-gnu --release
 ```
 
 
+
+### CI/CD
+
+- Workflows are defined in `.github/workflows/`.
+- On pull requests and pushes: run tests, clippy, fmt check, and `cargo audit`.
+- On tag (e.g., `v0.x.y`): build cross-compiled artifacts (ARMv7, AArch64, x86_64), generate `SHA256SUMS`, and publish to Releases.
+- Nightly prerelease is updated from `main`.
 
 ## Architecture
 
@@ -211,6 +253,18 @@ The application follows a modular architecture with clear separation of concerns
 ### Static Web UI
 
 - UI assets are served under `/ui` (and `/app` as an alias for compatibility)
+
+### Security
+
+- The HTTP API currently has no authentication and enables permissive CORS for development.
+- Deploy behind a trusted network or reverse proxy that enforces authentication.
+- Log file path defaults to `/var/log/phaeton.log`; ensure appropriate permissions.
+
+### Known limitations
+
+- Tibber, vehicle integrations, and updater are stubbed (not yet implemented).
+- D-Bus export is functional for core paths but not yet complete for all Venus OS paths.
+- API is unauthenticated; do not expose directly to untrusted networks.
 
 ## Configuration
 
@@ -281,4 +335,4 @@ CMD ["phaeton"]
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under MIT or Apache-2.0; see the LICENSE files for details.

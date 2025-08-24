@@ -14,6 +14,7 @@ use serde::Deserialize;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tokio::time::{Duration, timeout};
 use tokio_stream::StreamExt;
 use tower_http::services::ServeDir;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
@@ -51,21 +52,135 @@ async fn health() -> impl IntoResponse {
     (status = 200, description = "Driver status")
 ))]
 async fn status(State(state): State<AppState>) -> impl IntoResponse {
-    let drv = state.driver.lock().await;
-    let mut s = serde_json::json!({
-        "mode": drv.current_mode_code(),
-        "start_stop": drv.start_stop_code(),
-        "set_current": drv.get_intended_set_current(),
-        "station_max_current": drv.get_station_max_current(),
-        "device_instance": drv.config().device_instance,
-    });
-    if let Some(v) = drv.get_db_value("/Ac/Power") {
-        s["ac_power"] = v;
+    match timeout(Duration::from_millis(750), state.driver.lock()).await {
+        Ok(drv_guard) => {
+            let drv = drv_guard;
+            let mut root = serde_json::json!({
+                "mode": drv.current_mode_code(),
+                "start_stop": drv.start_stop_code(),
+                "set_current": drv.get_intended_set_current(),
+                "station_max_current": drv.get_station_max_current(),
+                "device_instance": drv.config().device_instance,
+            });
+
+            // Identity
+            if let Some(v) = drv.get_db_value("/ProductName") {
+                root["product_name"] = v;
+            }
+            if let Some(v) = drv.get_db_value("/Serial") {
+                root["serial"] = v;
+            }
+            if let Some(v) = drv.get_db_value("/FirmwareVersion") {
+                root["firmware"] = v;
+            }
+
+            // Status & phases
+            if let Some(v) = drv.get_db_value("/Status") {
+                root["status"] = v;
+            }
+            if let Some(v) = drv.get_db_value("/Ac/PhaseCount") {
+                root["active_phases"] = v;
+            }
+
+            // Power & currents
+            if let Some(v) = drv.get_db_value("/Ac/Power") {
+                root["ac_power"] = v;
+            }
+            if let Some(v) = drv.get_db_value("/Ac/Current") {
+                root["ac_current"] = v;
+            }
+            if let Some(v) = drv.get_db_value("/Ac/L1/Voltage") {
+                root["l1_voltage"] = v;
+            }
+            if let Some(v) = drv.get_db_value("/Ac/L2/Voltage") {
+                root["l2_voltage"] = v;
+            }
+            if let Some(v) = drv.get_db_value("/Ac/L3/Voltage") {
+                root["l3_voltage"] = v;
+            }
+            if let Some(v) = drv.get_db_value("/Ac/L1/Current") {
+                root["l1_current"] = v;
+            }
+            if let Some(v) = drv.get_db_value("/Ac/L2/Current") {
+                root["l2_current"] = v;
+            }
+            if let Some(v) = drv.get_db_value("/Ac/L3/Current") {
+                root["l3_current"] = v;
+            }
+            if let Some(v) = drv.get_db_value("/Ac/L1/Power") {
+                root["l1_power"] = v;
+            }
+            if let Some(v) = drv.get_db_value("/Ac/L2/Power") {
+                root["l2_power"] = v;
+            }
+            if let Some(v) = drv.get_db_value("/Ac/L3/Power") {
+                root["l3_power"] = v;
+            }
+
+            // Build session object
+            let mut session = serde_json::json!({});
+            if let Some(v) = drv.get_db_value("/ChargingTime") {
+                session["charging_time_sec"] = v;
+            }
+            if let Some(v) = drv.get_db_value("/Ac/Energy/Forward") {
+                session["energy_delivered_kwh"] = v;
+            }
+            let sessions_state = drv.sessions_snapshot();
+            if let Some(obj) = sessions_state.as_object() {
+                if let Some(cur) = obj.get("current_session").and_then(|v| v.as_object()) {
+                    if let Some(ts) = cur.get("start_time") {
+                        session["start_ts"] = ts.clone();
+                    }
+                    if let Some(v) = cur.get("energy_delivered_kwh") {
+                        session["energy_delivered_kwh"] = v.clone();
+                    }
+                }
+                if let Some(last) = obj.get("last_session").and_then(|v| v.as_object()) {
+                    if session.get("start_ts").is_none()
+                        && let Some(ts) = last.get("start_time")
+                    {
+                        session["start_ts"] = ts.clone();
+                    }
+                    if let Some(ts) = last.get("end_time") {
+                        session["end_ts"] = ts.clone();
+                    }
+                    if session.get("energy_delivered_kwh").is_none()
+                        && let Some(v) = last.get("energy_delivered_kwh")
+                    {
+                        session["energy_delivered_kwh"] = v.clone();
+                    }
+                    if let Some(v) = last.get("cost") {
+                        session["cost"] = v.clone();
+                    }
+                }
+            }
+
+            // Pricing hints from config
+            let pricing = &drv.config().pricing;
+            if !pricing.currency_symbol.is_empty() {
+                root["pricing_currency"] = serde_json::json!(pricing.currency_symbol.clone());
+            }
+            if pricing.source.to_lowercase() == "static" {
+                root["energy_rate"] = serde_json::json!(pricing.static_rate_eur_per_kwh);
+            }
+
+            if let Some(v) = drv.get_db_value("/Ac/Energy/Total") {
+                root["total_energy_kwh"] = v;
+            }
+
+            root["session"] = session;
+
+            Json(root).into_response()
+        }
+        Err(_) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "status_unavailable",
+                "reason": "driver_busy",
+            })),
+        )
+            .into_response(),
     }
-    if let Some(v) = drv.get_db_value("/Ac/Energy/Forward") {
-        s["energy_forward_kwh"] = v;
-    }
-    Json(s)
 }
 
 #[utoipa::path(post, path = "/api/mode", request_body = ModeBody, responses((status = 200)))]
@@ -350,10 +465,40 @@ pub async fn serve(driver: Arc<Mutex<AlfenDriver>>, host: &str, port: u16) -> an
     let state = AppState { driver };
     let router = build_router(state);
 
-    let addr: SocketAddr = match host.parse::<IpAddr>() {
-        Ok(ip) => SocketAddr::new(ip, port),
-        Err(_) => ([127, 0, 0, 1], port).into(),
+    // Structured logs for web server startup and binding
+    let logger = crate::logging::get_logger("web");
+    {
+        let msg = format!(
+            "Starting web server; requested host={}, port={}",
+            host, port
+        );
+        logger.info(&msg);
+    }
+
+    let (addr, parsed_ok): (SocketAddr, bool) = match host.parse::<IpAddr>() {
+        Ok(ip) => (SocketAddr::new(ip, port), true),
+        Err(_) => (([127, 0, 0, 1], port).into(), false),
     };
-    axum::serve(tokio::net::TcpListener::bind(addr).await?, router).await?;
+    if !parsed_ok {
+        let warn_msg = format!("Invalid host '{}'; falling back to 127.0.0.1", host);
+        logger.warn(&warn_msg);
+    }
+    {
+        let bind_msg = format!("Binding web server to {}:{}", addr.ip(), addr.port());
+        logger.info(&bind_msg);
+    }
+
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let local_addr = listener.local_addr()?;
+    {
+        let listen_msg = format!(
+            "Web server listening at http://{}:{} (UI /ui, API /api, docs /docs)",
+            local_addr.ip(),
+            local_addr.port()
+        );
+        logger.info(&listen_msg);
+    }
+
+    axum::serve(listener, router).await?;
     Ok(())
 }
