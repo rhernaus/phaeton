@@ -1,7 +1,7 @@
-# Phaeton - Alfen EV Charger Driver (Rust Rewrite)
+# Phaeton - EV Charger Driver
 
 ## Overview
-This project is a complete rewrite of the Python Alfen EV charger driver in Rust, providing a more performant, memory-safe, and maintainable implementation for integration with Victron Venus OS.
+This project is an EV charger driver, providing a performant, memory-safe, and maintainable implementation for integration with Victron Venus OS.
 
 ## Current Status
 - **Project initialized**: ✅ Basic Rust project structure created

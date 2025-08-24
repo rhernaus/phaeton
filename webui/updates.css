@@ -1,0 +1,36 @@
+/* Updates page */
+.updates-branch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.updates-branch .range-select {
+  min-width: 220px;
+}
+
+.updates-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 600px) {
+  .updates-branch {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .updates-branch label {
+    margin-bottom: 4px !important;
+  }
+  .updates-branch .range-select,
+  #btn_switch_branch {
+    width: 100%;
+  }
+  .updates-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+}

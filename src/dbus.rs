@@ -7,11 +7,11 @@
 use crate::driver::DriverCommand;
 use crate::error::{PhaetonError, Result};
 use crate::logging::get_logger;
-use std::collections::HashMap;
-use std::sync::Mutex;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use zbus::object_server::InterfaceRef;
-use zbus::zvariant::OwnedObjectPath;
+use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 use zbus::{Connection, Result as ZbusResult, names::WellKnownName};
 
 #[derive(Default)]
@@ -183,7 +183,10 @@ pub struct DbusService {
     logger: crate::logging::StructuredLogger,
     service_name: String,
     connection: Option<Connection>,
-    paths: HashMap<String, serde_json::Value>,
+    /// Shared BusItem state across all object paths
+    shared: Arc<Mutex<DbusSharedState>>,
+    /// Track which object paths have been registered on the object server
+    registered_paths: HashSet<String>,
     charger_path: OwnedObjectPath,
     commands_tx: mpsc::UnboundedSender<DriverCommand>,
 }
@@ -197,6 +200,7 @@ impl DbusService {
         let logger = get_logger("dbus");
         logger.info("Initializing D-Bus service (zbus)");
 
+        // Match the Python driver's service naming so Venus OS/systemcalc recognizes it
         let service_name = format!("com.victronenergy.evcharger.phaeton_{}", device_instance);
 
         let charger_path = OwnedObjectPath::try_from("/")
@@ -206,7 +210,8 @@ impl DbusService {
             logger,
             service_name,
             connection: None,
-            paths: HashMap::new(),
+            shared: Arc::new(Mutex::new(DbusSharedState::new(commands_tx.clone()))),
+            registered_paths: HashSet::new(),
             charger_path,
             commands_tx,
         })
@@ -230,19 +235,26 @@ impl DbusService {
         self.logger
             .info(&format!("D-Bus service started: {}", self.service_name));
 
-        // Initialize common paths with defaults (local cache)
-        self.paths.insert(
-            "/ProductName".to_string(),
-            serde_json::json!("Alfen EV Charger"),
-        );
-        self.paths
-            .insert("/FirmwareVersion".to_string(), serde_json::json!("Unknown"));
-        self.paths
-            .insert("/Serial".to_string(), serde_json::json!("Unknown"));
-        self.paths
-            .insert("/Ac/Energy/Forward".to_string(), serde_json::json!(0.0));
-        self.paths
-            .insert("/Ac/PhaseCount".to_string(), serde_json::json!(0));
+        // Initialize a few common cached paths so the property interface has sane defaults
+        {
+            let mut shared = self.shared.lock().unwrap();
+            shared.paths.insert(
+                "/ProductName".to_string(),
+                serde_json::json!("Phaeton EV Charger"),
+            );
+            shared
+                .paths
+                .insert("/FirmwareVersion".to_string(), serde_json::json!("Unknown"));
+            shared
+                .paths
+                .insert("/Serial".to_string(), serde_json::json!("Unknown"));
+            shared
+                .paths
+                .insert("/Ac/Energy/Forward".to_string(), serde_json::json!(0.0));
+            shared
+                .paths
+                .insert("/Ac/PhaseCount".to_string(), serde_json::json!(0));
+        }
 
         // Register charger interface at path
         let charger = EvCharger {
@@ -265,10 +277,58 @@ impl DbusService {
         Ok(())
     }
 
-    /// Update a D-Bus path value (local cache for now)
+    /// Ensure a BusItem exists for a path with initial value and writability.
+    pub async fn ensure_item(
+        &mut self,
+        path: &str,
+        initial_value: serde_json::Value,
+        writable: bool,
+    ) -> Result<()> {
+        // Register object path if not registered yet
+        if !self.registered_paths.contains(path) {
+            let obj_path = OwnedObjectPath::try_from(path).map_err(|e| {
+                PhaetonError::dbus(format!("Invalid object path '{}': {}", path, e))
+            })?;
+
+            let item = BusItem::new(path.to_string(), Arc::clone(&self.shared));
+
+            if let Some(conn) = &self.connection {
+                conn.object_server()
+                    .at(&obj_path, item)
+                    .await
+                    .map_err(|e| {
+                        PhaetonError::dbus(format!("Register BusItem failed for {}: {}", path, e))
+                    })?;
+            }
+
+            self.registered_paths.insert(path.to_string());
+        }
+
+        // Initialize value and writability
+        {
+            let mut shared = self.shared.lock().unwrap();
+            if !shared.paths.contains_key(path) {
+                shared.paths.insert(path.to_string(), initial_value);
+            }
+            if writable {
+                shared.writable.insert(path.to_string());
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Update a D-Bus path value (local cache and reflective properties)
     pub async fn update_path(&mut self, path: &str, value: serde_json::Value) -> Result<()> {
         self.logger.debug(&format!("DBus set {} = {}", path, value));
-        self.paths.insert(path.to_string(), value.clone());
+        // Ensure BusItem exists, default not writable
+        let _ = self.ensure_item(path, value.clone(), false).await;
+
+        // Update shared cache
+        {
+            let mut shared = self.shared.lock().unwrap();
+            shared.paths.insert(path.to_string(), value.clone());
+        }
 
         // Reflect into interface properties if known
         if let Some(conn) = &self.connection {
@@ -432,8 +492,9 @@ impl DbusService {
     }
 
     /// Read last value (local cache)
-    pub fn get(&self, path: &str) -> Option<&serde_json::Value> {
-        self.paths.get(path)
+    pub fn get(&self, path: &str) -> Option<serde_json::Value> {
+        let shared = self.shared.lock().unwrap();
+        shared.paths.get(path).cloned()
     }
 
     // TODO: Export a real object tree with org.freedesktop.DBus.Properties to expose values on the bus.
@@ -446,5 +507,161 @@ impl DbusService {
             .request_name(name, RequestNameFlags::ReplaceExisting.into())
             .await?;
         Ok(())
+    }
+}
+
+/// Shared state for BusItems
+struct DbusSharedState {
+    paths: HashMap<String, serde_json::Value>,
+    writable: HashSet<String>,
+    commands_tx: mpsc::UnboundedSender<DriverCommand>,
+}
+
+impl DbusSharedState {
+    fn new(commands_tx: mpsc::UnboundedSender<DriverCommand>) -> Self {
+        Self {
+            paths: HashMap::new(),
+            writable: HashSet::new(),
+            commands_tx,
+        }
+    }
+}
+
+/// VeDbus-style BusItem implementing com.victronenergy.BusItem
+struct BusItem {
+    path: String,
+    shared: Arc<Mutex<DbusSharedState>>,
+}
+
+impl BusItem {
+    fn new(path: String, shared: Arc<Mutex<DbusSharedState>>) -> Self {
+        Self { path, shared }
+    }
+
+    pub(crate) fn serde_to_owned_value(v: &serde_json::Value) -> OwnedValue {
+        match v {
+            serde_json::Value::Null => OwnedValue::from(0i64),
+            serde_json::Value::Bool(b) => OwnedValue::from(*b),
+            serde_json::Value::Number(n) => {
+                if let Some(i) = n.as_i64() {
+                    OwnedValue::from(i)
+                } else if let Some(u) = n.as_u64() {
+                    OwnedValue::from(u)
+                } else {
+                    OwnedValue::from(n.as_f64().unwrap_or(0.0))
+                }
+            }
+            serde_json::Value::String(s) => OwnedValue::try_from(Value::from(s.as_str()))
+                .unwrap_or_else(|_| OwnedValue::from(0i64)),
+            _ => OwnedValue::from(0i64),
+        }
+    }
+
+    pub(crate) fn owned_value_to_serde(v: &OwnedValue) -> serde_json::Value {
+        if let Ok(b) = <bool as TryFrom<&OwnedValue>>::try_from(v) {
+            return serde_json::json!(b);
+        }
+        if let Ok(i) = <i64 as TryFrom<&OwnedValue>>::try_from(v) {
+            return serde_json::json!(i);
+        }
+        if let Ok(u) = <u64 as TryFrom<&OwnedValue>>::try_from(v) {
+            return serde_json::json!(u);
+        }
+        if let Ok(f) = <f64 as TryFrom<&OwnedValue>>::try_from(v) {
+            return serde_json::json!(f);
+        }
+        if let Ok(s) = <&str as TryFrom<&OwnedValue>>::try_from(v) {
+            return serde_json::json!(s.to_string());
+        }
+        serde_json::json!(v.to_string())
+    }
+}
+
+#[zbus::interface(name = "com.victronenergy.BusItem")]
+impl BusItem {
+    /// Return the current value of this item
+    #[zbus(name = "GetValue")]
+    async fn get_value(&self) -> OwnedValue {
+        let val = {
+            let shared = self.shared.lock().unwrap();
+            shared
+                .paths
+                .get(&self.path)
+                .cloned()
+                .unwrap_or(serde_json::json!(0))
+        };
+        Self::serde_to_owned_value(&val)
+    }
+
+    /// Attempt to set the value; returns true on success
+    #[zbus(name = "SetValue")]
+    async fn set_value(&self, value: OwnedValue) -> bool {
+        let mut shared = self.shared.lock().unwrap();
+        if !shared.writable.contains(&self.path) {
+            return false;
+        }
+
+        let sv = Self::owned_value_to_serde(&value);
+        // Update cache
+        shared.paths.insert(self.path.clone(), sv.clone());
+
+        // Map writable items to driver commands
+        match self.path.as_str() {
+            "/Mode" => {
+                let m = sv.as_u64().unwrap_or(0) as u8;
+                let _ = shared.commands_tx.send(DriverCommand::SetMode(m));
+            }
+            "/StartStop" => {
+                let v = sv.as_u64().unwrap_or(0) as u8;
+                let _ = shared.commands_tx.send(DriverCommand::SetStartStop(v));
+            }
+            "/SetCurrent" => {
+                let a = sv.as_f64().unwrap_or(0.0) as f32;
+                let _ = shared.commands_tx.send(DriverCommand::SetCurrent(a));
+            }
+            _ => {}
+        }
+
+        true
+    }
+
+    /// Return a textual representation of the current value
+    #[zbus(name = "GetText")]
+    async fn get_text(&self) -> String {
+        let val = {
+            let shared = self.shared.lock().unwrap();
+            shared
+                .paths
+                .get(&self.path)
+                .cloned()
+                .unwrap_or(serde_json::json!(0))
+        };
+        match val {
+            serde_json::Value::Number(n) => {
+                if let Some(f) = n.as_f64() {
+                    format!("{:.2}", f)
+                } else {
+                    n.to_string()
+                }
+            }
+            serde_json::Value::String(s) => s,
+            serde_json::Value::Bool(b) => b.to_string(),
+            _ => val.to_string(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serde_string_is_mapped_to_dbus_string() {
+        let json_val = serde_json::json!("Phaeton EV Charger");
+        let owned = BusItem::serde_to_owned_value(&json_val);
+
+        // Ensure it is represented as a D-Bus string and round-trips back
+        let back = BusItem::owned_value_to_serde(&owned);
+        assert_eq!(back, json_val);
     }
 }

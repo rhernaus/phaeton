@@ -1,6 +1,6 @@
-//! # Phaeton - Alfen EV Charger Driver for Victron Venus OS
+//! # Phaeton - EV Charger Driver for Victron Venus OS
 //!
-//! A high-performance Rust implementation of the Alfen EV charger driver,
+//! A high-performance Rust implementation of the EV charger driver,
 //! providing seamless integration with Victron Venus OS through D-Bus and
 //! offering advanced features like dynamic pricing, vehicle integration, and
 //! self-updates.
@@ -9,7 +9,7 @@
 //!
 //! - **High Performance**: Async-first design with Tokio runtime
 //! - **Memory Safe**: Rust's ownership system prevents common bugs
-//! - **Modbus TCP**: Direct communication with Alfen EV chargers
+//! - **Modbus TCP**: Direct communication with EV chargers
 //! - **D-Bus Integration**: Full Venus OS compatibility
 //! - **Web Interface**: REST API and static file serving
 //! - **Dynamic Pricing**: Tibber API integration for smart charging

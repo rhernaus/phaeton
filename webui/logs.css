@@ -1,0 +1,21 @@
+/* Logs view */
+.logs-pre {
+  background-color: #0f172a;
+  color: #e2e8f0;
+  border: 1px solid #263245;
+  border-radius: 8px;
+  padding: 12px;
+  height: 360px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
+.logs-controls {
+  display: flex;
+  align-items: center;
+  margin: 8px 0 12px 0;
+}

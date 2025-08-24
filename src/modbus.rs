@@ -1,6 +1,6 @@
-//! Modbus TCP client for Alfen EV charger communication
+//! Modbus TCP client for EV charger communication
 //!
-//! This module provides async Modbus TCP communication with the Alfen EV charger,
+//! This module provides async Modbus TCP communication with the EV charger,
 //! handling both socket slave (real-time data) and station slave (configuration)
 //! operations with proper error handling and connection management.
 
@@ -13,7 +13,7 @@ use tokio::time::{sleep, timeout};
 use tokio_modbus::client::tcp;
 use tokio_modbus::prelude::*;
 
-/// Modbus TCP client for Alfen communication
+/// Modbus TCP client for EV charger communication
 pub struct ModbusClient {
     /// Modbus TCP client connection
     client: Option<tokio_modbus::client::Context>,

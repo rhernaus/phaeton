@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Phaeton EV Charger</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+            rel="stylesheet"
+        />
+        <link rel="stylesheet" href="/ui/base.css" />
+        <link rel="stylesheet" href="/ui/layout.css" />
+        <link rel="stylesheet" href="/ui/components.css" />
+        <link rel="stylesheet" href="/ui/dashboard.css" />
+        <link rel="stylesheet" href="/ui/config.css" />
+        <link rel="stylesheet" href="/ui/updates.css" />
+        <link rel="stylesheet" href="/ui/logs.css" />
+    </head>
+    <body>
+        <a class="skip-link" href="#main">Skip to content</a>
+        <header class="topbar" role="banner">
+            <div class="brand">
+                <span class="logo" aria-hidden="true">⚡</span>
+                <span class="brand-name">Phaeton EV Charger</span>
+            </div>
+            <div class="topbar-right">
+                <div class="topbar-status">
+                    <span class="dot" id="conn_dot" aria-live="polite" aria-label="Connection status"></span>
+                    <span id="conn_text">Connecting…</span>
+                </div>
+                <button
+                    id="menu_toggle"
+                    class="menu-button"
+                    aria-haspopup="true"
+                    aria-expanded="false"
+                    aria-controls="menu_dropdown"
+                    title="Menu"
+                >
+                    ☰
+                </button>
+                <div id="menu_dropdown" class="dropdown-menu" role="menu" style="display: none">
+                    <button id="dashboard_view" class="view-btn active" aria-pressed="true">
+                        <span class="view-icon">📊</span>
+                        <span>Dashboard</span>
+                    </button>
+                    <button id="config_view" class="view-btn" aria-pressed="false">
+                        <span class="view-icon">⚙️</span>
+                        <span>Configuration</span>
+                    </button>
+                    <button id="updates_view" class="view-btn" aria-pressed="false">
+                        <span class="view-icon">🆙</span>
+                        <span>Updates</span>
+                    </button>
+                    <button id="logs_view" class="view-btn" aria-pressed="false">
+                        <span class="view-icon">📜</span>
+                        <span>Logs</span>
+                    </button>
+                </div>
+            </div>
+        </header>
+        <div id="error_banner" class="error-banner" role="alert" aria-live="assertive" style="display: none"></div>
+        <div id="main" class="container" role="main">
+            <!-- Dashboard View (default) -->
+            <div id="dashboard_content" class="view-content">
+                <!-- Main charging status card -->
+                <div class="card charging-card">
+                    <div class="charging-header">
+                        <div class="mode-selector">
+                            <span class="mode-label">Charge Mode</span>
+                            <div class="mode-buttons">
+                                <button id="mode_manual" data-mode="0" class="mode-btn active" aria-pressed="true">
+                                    <span class="mode-icon">⚡</span>
+                                    <span>Manual</span>
+                                </button>
+                                <button id="mode_auto" data-mode="1" class="mode-btn" aria-pressed="false">
+                                    <span class="mode-icon">🤖</span>
+                                    <span>Auto</span>
+                                </button>
+                                <button id="mode_sched" data-mode="2" class="mode-btn" aria-pressed="false">
+                                    <span class="mode-icon">📅</span>
+                                    <span>Scheduled</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="charging-control">
+                            <div class="current-info">
+                                <span class="charging-status" id="current_slider_label">Charging Current</span>
+                                <span class="current-range">[6-25A]</span>
+                            </div>
+                            <span class="current-display" id="current_display" aria-live="polite">11 A</span>
+                            <input
+                                type="range"
+                                id="current_slider"
+                                min="6"
+                                max="25"
+                                step="1"
+                                value="11"
+                                class="current-slider compact"
+                                role="slider"
+                                aria-labelledby="current_slider_label"
+                                aria-valuemin="6"
+                                aria-valuemax="25"
+                                aria-valuenow="11"
+                            />
+                            <button id="charge_btn" class="stop-btn" aria-pressed="true" aria-label="Stop charging">
+                                <span class="btn-icon">⏹️</span>
+                                <span>Stop</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="charging-visual">
+                        <div class="power-display">
+                            <span id="hero_power_w" class="power-value">0</span>
+                            <span class="power-unit" id="hero_power_unit">W</span>
+                        </div>
+                        <div class="status-line">
+                            <span id="status_text" class="status-text">Charging 3P</span>
+                        </div>
+                    </div>
+
+                    <!-- Live Chart Section -->
+                    <div class="chart-section">
+                        <div class="chart-header">
+                            <h3>Live Charging Data</h3>
+                            <div class="chart-controls">
+                                <span>Window</span>
+                                <select id="range" class="range-select">
+                                    <option value="300" selected>300 s</option>
+                                    <option value="3600">3600 s</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div style="position: relative">
+                            <canvas id="chart" width="800" height="200"></canvas>
+                            <div id="chart_tooltip" class="chart-tooltip" style="display: none"></div>
+                        </div>
+                        <div class="chart-legend">
+                            <span class="legend-item"><span class="legend-dot actual"></span>Actual current</span>
+                            <span class="legend-item"><span class="legend-dot allowed"></span>Allowed current</span>
+                            <span class="legend-item"><span class="legend-dot station"></span>Station max</span>
+                        </div>
+                    </div>
+
+                    <!-- Session info cards -->
+                    <div class="info-grid">
+                        <div class="info-card">
+                            <svg class="info-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <circle cx="12" cy="12" r="10" stroke="#4A9FD8" stroke-width="2" />
+                                <path
+                                    d="M12 6 L12 12 L16 16"
+                                    stroke="#4A9FD8"
+                                    stroke-width="2"
+                                    stroke-linecap="round"
+                                />
+                            </svg>
+                            <span class="info-label">Session time</span>
+                            <span class="info-value" id="session_time">04:59:37</span>
+                        </div>
+
+                        <div class="info-card">
+                            <svg class="info-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path
+                                    d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"
+                                    stroke="#4A9FD8"
+                                    stroke-width="2"
+                                    fill="none"
+                                />
+                            </svg>
+                            <span class="info-label">Session energy</span>
+                            <span class="info-value"><span id="session_energy">33.80</span> kWh</span>
+                        </div>
+
+                        <div class="info-card">
+                            <svg class="info-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path
+                                    d="M12 2v20M17 5l-5 5-5-5M7 19l5-5 5 5"
+                                    stroke="#4A9FD8"
+                                    stroke-width="2"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                />
+                            </svg>
+                            <span class="info-label">Session cost</span>
+                            <span class="info-value" id="session_cost">2.93</span>
+                        </div>
+
+                        <div class="info-card">
+                            <svg class="info-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <rect x="3" y="3" width="18" height="18" rx="2" stroke="#4A9FD8" stroke-width="2" />
+                                <path d="M3 9h18M9 21V9" stroke="#4A9FD8" stroke-width="2" />
+                            </svg>
+                            <span class="info-label">Total energy</span>
+                            <span class="info-value"><span id="total_energy">3121.34</span> kWh</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Configuration View -->
+            <div id="config_content" class="view-content" style="display: none">
+                <div class="config-container">
+                    <div class="config-header-modern">
+                        <div class="config-title">
+                            <h2>⚙️ Configuration</h2>
+                            <p class="config-subtitle">Customize your EV charging system settings</p>
+                        </div>
+                    </div>
+
+                    <!-- Quick Settings Panel removed per request -->
+
+                    <!-- Navigation chips removed per UX request -->
+
+                    <!-- Configuration Form -->
+                    <div class="config-form-container">
+                        <div id="config_form" class="config-form-modern"></div>
+                        <div class="config-actions-bottom">
+                            <button id="save_config" class="save-btn-modern">
+                                <span class="btn-icon">💾</span>
+                                <span>Save Configuration</span>
+                            </button>
+                            <span id="config_status" class="config-status-modern"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Updates View -->
+            <div id="updates_content" class="view-content" style="display: none">
+                <div class="card">
+                    <h2>Software Updates</h2>
+                    <p>Check for new commits on the current Git branch and update.</p>
+                    <div class="updates-branch">
+                        <label for="branch_select" style="margin-right: 8px; font-weight: 600; color: #475569"
+                            >Branch</label
+                        >
+                        <select id="branch_select" class="range-select"></select>
+                        <button id="btn_switch_branch" class="save-btn-modern" style="margin-left: 8px">
+                            <span class="btn-icon">🔀</span>
+                            <span>Switch Branch</span>
+                        </button>
+                    </div>
+                    <div class="updates-actions">
+                        <button id="btn_check_updates" class="save-btn-modern">
+                            <span class="btn-icon">🔎</span>
+                            <span>Check for updates</span>
+                        </button>
+                        <button id="btn_apply_updates" class="save-btn-modern">
+                            <span class="btn-icon">⬆️</span>
+                            <span>Update & Restart</span>
+                        </button>
+                    </div>
+                    <div id="updates_status" class="config-status-modern" style="margin-top: 12px"></div>
+                </div>
+            </div>
+
+            <!-- Logs View -->
+            <div id="logs_content" class="view-content" style="display: none">
+                <div class="card">
+                    <h2>Logs</h2>
+                    <div class="logs-controls">
+                        <button id="btn_clear_logs" class="save-btn-modern" title="Clear shown logs">🧹 Clear</button>
+                        <label class="modern-toggle" style="margin-left: 12px">
+                            <input type="checkbox" id="logs_pause" />
+                            <span class="toggle-slider"></span>
+                            <span class="toggle-label">Pause</span>
+                        </label>
+                    </div>
+                    <pre id="logs_pre" class="logs-pre" aria-live="polite"></pre>
+                </div>
+            </div>
+
+            <div class="footer">
+                <span>Device instance: <span id="di"></span></span>
+                <div class="device-info">
+                    <span id="product"></span>
+                    <span id="serial"></span>
+                    <span id="firmware"></span>
+                </div>
+            </div>
+
+            <script src="/ui/app.js"></script>
+        </div>
+    </body>
+</html>
