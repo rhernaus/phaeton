@@ -56,17 +56,27 @@ pub fn init_logging(config: &LoggingConfig) -> Result<()> {
         file_layer.boxed()
     };
 
-    // Set up the subscriber with file logging
+    // Start with file logging
     let subscriber = registry.with(file_layer);
 
-    // Add console logging if enabled (simplified approach)
+    // Optionally add console logging and initialize
     if config.console_output {
-        // For now, we'll rely on the default console output from the file layer
-        // TODO: Implement proper dual output (file + console) when needed
-    }
+        let console_layer = fmt::layer()
+            .with_writer(std::io::stdout)
+            .with_target(false)
+            .with_thread_ids(false)
+            .with_file(false);
 
-    // Initialize the subscriber
-    subscriber.init();
+        let console_layer = if config.json_format {
+            console_layer.json().boxed()
+        } else {
+            console_layer.boxed()
+        };
+
+        subscriber.with(console_layer).init();
+    } else {
+        subscriber.init();
+    }
 
     info!(
         "Logging initialized - level: {}, file: {}",
