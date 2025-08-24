@@ -31,6 +31,8 @@ struct EvChargerValues {
     current: f64,
     ac_power: f64,
     ac_energy_forward: f64,
+    // Optional: total meter energy if tracked; currently derived in shared map
+    // ac_energy_total: f64,
     ac_current: f64,
     phase_count: u8,
     l1_voltage: f64,
@@ -121,6 +123,13 @@ impl EvCharger {
 
     #[zbus(property)]
     fn ac_energy_forward(&self) -> f64 {
+        self.values.lock().unwrap().ac_energy_forward
+    }
+
+    #[zbus(property)]
+    fn ac_energy_total(&self) -> f64 {
+        // Not tracked separately in EvChargerValues; derive from D-Bus shared map when available
+        // For now, return forward energy as a safe fallback to avoid exposing NaN
         self.values.lock().unwrap().ac_energy_forward
     }
 

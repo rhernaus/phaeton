@@ -533,6 +533,11 @@ impl AlfenDriver {
                     "/Ac/Energy/Forward".to_string(),
                     serde_json::json!(energy_forward),
                 ));
+                // Total lifetime energy (kWh) from meter reading
+                updates.push((
+                    "/Ac/Energy/Total".to_string(),
+                    serde_json::json!(energy_kwh),
+                ));
                 // Derived paths
                 let max_phase_current = l1_i.max(l2_i.max(l3_i));
                 updates.push((

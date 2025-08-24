@@ -52,20 +52,127 @@ async fn health() -> impl IntoResponse {
 ))]
 async fn status(State(state): State<AppState>) -> impl IntoResponse {
     let drv = state.driver.lock().await;
-    let mut s = serde_json::json!({
+    let mut root = serde_json::json!({
         "mode": drv.current_mode_code(),
         "start_stop": drv.start_stop_code(),
         "set_current": drv.get_intended_set_current(),
         "station_max_current": drv.get_station_max_current(),
         "device_instance": drv.config().device_instance,
     });
+
+    // Identity
+    if let Some(v) = drv.get_db_value("/ProductName") {
+        root["product_name"] = v;
+    }
+    if let Some(v) = drv.get_db_value("/Serial") {
+        root["serial"] = v;
+    }
+    if let Some(v) = drv.get_db_value("/FirmwareVersion") {
+        root["firmware"] = v;
+    }
+
+    // Status & phases
+    if let Some(v) = drv.get_db_value("/Status") {
+        root["status"] = v;
+    }
+    if let Some(v) = drv.get_db_value("/Ac/PhaseCount") {
+        root["active_phases"] = v;
+    }
+
+    // Power & currents
     if let Some(v) = drv.get_db_value("/Ac/Power") {
-        s["ac_power"] = v;
+        root["ac_power"] = v;
+    }
+    if let Some(v) = drv.get_db_value("/Ac/Current") {
+        root["ac_current"] = v;
+    }
+    if let Some(v) = drv.get_db_value("/Ac/L1/Voltage") {
+        root["l1_voltage"] = v;
+    }
+    if let Some(v) = drv.get_db_value("/Ac/L2/Voltage") {
+        root["l2_voltage"] = v;
+    }
+    if let Some(v) = drv.get_db_value("/Ac/L3/Voltage") {
+        root["l3_voltage"] = v;
+    }
+    if let Some(v) = drv.get_db_value("/Ac/L1/Current") {
+        root["l1_current"] = v;
+    }
+    if let Some(v) = drv.get_db_value("/Ac/L2/Current") {
+        root["l2_current"] = v;
+    }
+    if let Some(v) = drv.get_db_value("/Ac/L3/Current") {
+        root["l3_current"] = v;
+    }
+    if let Some(v) = drv.get_db_value("/Ac/L1/Power") {
+        root["l1_power"] = v;
+    }
+    if let Some(v) = drv.get_db_value("/Ac/L2/Power") {
+        root["l2_power"] = v;
+    }
+    if let Some(v) = drv.get_db_value("/Ac/L3/Power") {
+        root["l3_power"] = v;
+    }
+
+    // Build session object
+    let mut session = serde_json::json!({});
+    if let Some(v) = drv.get_db_value("/ChargingTime") {
+        session["charging_time_sec"] = v;
     }
     if let Some(v) = drv.get_db_value("/Ac/Energy/Forward") {
-        s["energy_forward_kwh"] = v;
+        // Expose delivered energy under session
+        session["energy_delivered_kwh"] = v;
     }
-    Json(s)
+    // Optionally attach start/end timestamps and cost from session manager state
+    let sessions_state = drv.sessions_snapshot();
+    if let Some(obj) = sessions_state.as_object() {
+        if let Some(cur) = obj.get("current_session").and_then(|v| v.as_object()) {
+            if let Some(ts) = cur.get("start_time") {
+                session["start_ts"] = ts.clone();
+            }
+            if let Some(v) = cur.get("energy_delivered_kwh") {
+                session["energy_delivered_kwh"] = v.clone();
+            }
+        }
+        if let Some(last) = obj.get("last_session").and_then(|v| v.as_object()) {
+            if !session.get("start_ts").is_some() {
+                if let Some(ts) = last.get("start_time") {
+                    session["start_ts"] = ts.clone();
+                }
+            }
+            if let Some(ts) = last.get("end_time") {
+                session["end_ts"] = ts.clone();
+            }
+            if session.get("energy_delivered_kwh").is_none() {
+                if let Some(v) = last.get("energy_delivered_kwh") {
+                    session["energy_delivered_kwh"] = v.clone();
+                }
+            }
+            if let Some(v) = last.get("cost") {
+                session["cost"] = v.clone();
+            }
+        }
+    }
+
+    // Pricing hints from config
+    let pricing = &drv.config().pricing;
+    if !pricing.currency_symbol.is_empty() {
+        root["pricing_currency"] = serde_json::json!(pricing.currency_symbol.clone());
+    }
+    // When static pricing is configured, expose energy_rate; dynamic sources handled elsewhere
+    if pricing.source.to_lowercase() == "static" {
+        root["energy_rate"] = serde_json::json!(pricing.static_rate_eur_per_kwh);
+    }
+
+    // Total lifetime energy if available from meter snapshot (published each poll cycle)
+    if let Some(v) = drv.get_db_value("/Ac/Energy/Total") {
+        root["total_energy_kwh"] = v;
+    }
+
+    // Attach session
+    root["session"] = session;
+
+    Json(root)
 }
 
 #[utoipa::path(post, path = "/api/mode", request_body = ModeBody, responses((status = 200)))]

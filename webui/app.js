@@ -662,19 +662,20 @@ async function fetchStatus() {
 
     // Update session info elements with actual data from backend
     if ($('session_time')) {
-      // Prefer charger-reported ChargingTime (seconds) to avoid timezone issues
-      if (typeof s.charging_time === 'number' && s.charging_time > 0) {
-        const duration = Math.floor(s.charging_time);
+      // Prefer session-level charging_time_sec (seconds) when provided
+      const sess = s.session || {};
+      if (typeof sess.charging_time_sec === 'number' && sess.charging_time_sec >= 0) {
+        const duration = Math.floor(sess.charging_time_sec);
         const hours = Math.floor(duration / 3600);
         const minutes = Math.floor((duration % 3600) / 60);
         const seconds = duration % 60;
         $('session_time').textContent = `${hours.toString().padStart(2, '0')}:${minutes
           .toString()
           .padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-      } else if (s.session && s.session.start_ts) {
+      } else if (sess && sess.start_ts) {
         // Fallback: compute from session start/end timestamps
-        const startTime = new Date(s.session.start_ts).getTime();
-        const endTime = s.session.end_ts ? new Date(s.session.end_ts).getTime() : Date.now();
+        const startTime = new Date(sess.start_ts).getTime();
+        const endTime = sess.end_ts ? new Date(sess.end_ts).getTime() : Date.now();
         const duration = Math.floor((endTime - startTime) / 1000);
         const hours = Math.floor(duration / 3600);
         const minutes = Math.floor((duration % 3600) / 60);
@@ -687,14 +688,19 @@ async function fetchStatus() {
       }
     }
     if ($('session_energy')) {
-      // Use actual session energy from Ac/Energy/Forward
-      $('session_energy').textContent = (s.energy_forward_kwh ?? 0).toFixed(2);
+      // Use session-level delivered energy
+      const energy = (s.session && typeof s.session.energy_delivered_kwh === 'number')
+        ? s.session.energy_delivered_kwh
+        : 0;
+      $('session_energy').textContent = Number(energy).toFixed(2);
     }
     if ($('session_cost')) {
-      // Prefer server-calculated session_cost (hourly price aware) if provided
-      let cost = s.session_cost;
+      // Prefer server-calculated session cost if provided under session
+      let cost = s.session && s.session.cost;
       if (cost === null || cost === undefined) {
-        const energy = s.energy_forward_kwh ?? 0;
+        const energy = (s.session && typeof s.session.energy_delivered_kwh === 'number')
+          ? s.session.energy_delivered_kwh
+          : 0;
         // Fallback: flat rate per kWh when hourly breakdown is unavailable
         const rate = s.energy_rate ?? 0.25;
         cost = energy * rate;
@@ -1875,14 +1881,12 @@ setInterval(() => {
 setInterval(() => {
   const sessionTimeEl = $('session_time');
   if (sessionTimeEl && window.lastStatusData && window.lastStatusData.status === 2) {
-    // Update time display if actively charging: prefer charging_time
-    if (
-      typeof window.lastStatusData.charging_time === 'number' &&
-      window.lastStatusData.charging_time >= 0
-    ) {
+    // Update time display if actively charging: prefer session.charging_time_sec
+    const sess = window.lastStatusData.session || {};
+    if (typeof sess.charging_time_sec === 'number' && sess.charging_time_sec >= 0) {
+      const base = sess.charging_time_sec;
       const duration = Math.floor(
-        window.lastStatusData.charging_time +
-          (Date.now() / 1000 - (window.lastStatusData._last_update_ts || Date.now() / 1000))
+        base + (Date.now() / 1000 - (window.lastStatusData._last_update_ts || Date.now() / 1000))
       );
       const hours = Math.floor(duration / 3600);
       const minutes = Math.floor((duration % 3600) / 60);
@@ -1890,8 +1894,8 @@ setInterval(() => {
       sessionTimeEl.textContent = `${hours.toString().padStart(2, '0')}:${minutes
         .toString()
         .padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-    } else if (window.lastStatusData.session && window.lastStatusData.session.start_ts) {
-      const startTime = new Date(window.lastStatusData.session.start_ts).getTime();
+    } else if (sess && sess.start_ts) {
+      const startTime = new Date(sess.start_ts).getTime();
       const duration = Math.floor((Date.now() - startTime) / 1000);
       const hours = Math.floor(duration / 3600);
       const minutes = Math.floor((duration % 3600) / 60);
