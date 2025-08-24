@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tokio::time::{Duration, timeout};
-use zbus::object_server::InterfaceRef;
+use zbus::object_server::{InterfaceRef, SignalContext};
 use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 use zbus::{Connection, Proxy, Result as ZbusResult, names::WellKnownName};
 
@@ -303,6 +303,12 @@ impl RootBus {
         }
         result
     }
+
+    #[zbus(signal)]
+    async fn items_changed(
+        ctxt: &SignalContext<'_>,
+        changes: std::collections::HashMap<&str, std::collections::HashMap<&str, OwnedValue>>,
+    ) -> zbus::Result<()>;
 }
 
 /// D-Bus service manager
@@ -704,6 +710,40 @@ impl DbusService {
                 }
                 _ => {}
             }
+            // Emit change signals so listeners (VeDbusItemImport) update immediately
+            // 1) Per-path PropertiesChanged on the BusItem
+            let item_ctx = SignalContext::new(
+                conn,
+                OwnedObjectPath::try_from(path).map_err(|e| {
+                    PhaetonError::dbus(format!("Invalid object path '{}': {}", path, e))
+                })?,
+            )
+            .map_err(|e| PhaetonError::dbus(format!("SignalContext new failed: {}", e)))?;
+            let mut changes: std::collections::HashMap<&str, OwnedValue> =
+                std::collections::HashMap::new();
+            changes.insert("Value", BusItem::serde_to_owned_value(&value));
+            let text = format_text_value(&value);
+            let text_ov = OwnedValue::try_from(Value::from(text.as_str()))
+                .unwrap_or_else(|_| OwnedValue::from(0i64));
+            changes.insert("Text", text_ov);
+            let _ = BusItem::properties_changed(&item_ctx, changes).await;
+
+            // 2) Root ItemsChanged summarizing the changed path
+            let root_ctx = SignalContext::new(conn, self.charger_path.clone())
+                .map_err(|e| PhaetonError::dbus(format!("Root SignalContext failed: {}", e)))?;
+            let mut inner: std::collections::HashMap<&str, OwnedValue> =
+                std::collections::HashMap::new();
+            inner.insert("Value", BusItem::serde_to_owned_value(&value));
+            let text = format_text_value(&value);
+            let text_ov = OwnedValue::try_from(Value::from(text.as_str()))
+                .unwrap_or_else(|_| OwnedValue::from(0i64));
+            inner.insert("Text", text_ov);
+            let mut outer: std::collections::HashMap<
+                &str,
+                std::collections::HashMap<&str, OwnedValue>,
+            > = std::collections::HashMap::new();
+            outer.insert(path, inner);
+            let _ = RootBus::items_changed(&root_ctx, outer).await;
         }
         Ok(())
     }
@@ -910,6 +950,12 @@ impl BusItem {
             _ => val.to_string(),
         }
     }
+
+    #[zbus(signal)]
+    async fn properties_changed(
+        ctxt: &SignalContext<'_>,
+        changes: std::collections::HashMap<&str, OwnedValue>,
+    ) -> zbus::Result<()>;
 }
 
 /// Helper to format a JSON value into the textual representation used by GetText
