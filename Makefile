@@ -84,16 +84,26 @@ install-cross-deps:
 package-release: cross-build-armv7 cross-build-arm64 build-macos
 	@echo "Creating release packages..."
 	@mkdir -p dist
-	@cd target/armv7-unknown-linux-gnueabihf/release && \
-		tar -czf phaeton-armv7-unknown-linux-gnueabihf.tar.gz phaeton && \
-		mv phaeton-armv7-unknown-linux-gnueabihf.tar.gz ../../../dist/
-	@cd target/aarch64-unknown-linux-gnu/release && \
-		tar -czf phaeton-aarch64-unknown-linux-gnu.tar.gz phaeton && \
-		mv phaeton-aarch64-unknown-linux-gnu.tar.gz ../../../dist/
-	@cd target/release && \
-		tar -czf phaeton-macos-arm64.tar.gz phaeton && \
-		mv phaeton-macos-arm64.tar.gz ../../../dist/
-	@echo "Release packages created in dist/ directory"
+	@VERSION=$${PHAETON_VERSION:-$$(grep -m1 '^version\s*=\s*"' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')} ; \\
+	if git describe --tags --abbrev=0 >/dev/null 2>&1 ; then \\
+	  TAG=$$(git describe --tags --abbrev=0 2>/dev/null || true) ; \\
+	  case "$$TAG" in \\
+	    v$$VERSION*) VERSION=$${TAG#v} ;; \\
+	  esac ; \\
+	fi ; \\
+	cd target/armv7-unknown-linux-gnueabihf/release && \\
+		tar -czf phaeton-v$$VERSION-armv7-unknown-linux-gnueabihf.tar.gz phaeton && \\
+		mv phaeton-v$$VERSION-armv7-unknown-linux-gnueabihf.tar.gz ../../../dist/ ; \\
+	cd - >/dev/null ; \\
+	cd target/aarch64-unknown-linux-gnu/release && \\
+		tar -czf phaeton-v$$VERSION-aarch64-unknown-linux-gnu.tar.gz phaeton && \\
+		mv phaeton-v$$VERSION-aarch64-unknown-linux-gnu.tar.gz ../../../dist/ ; \\
+	cd - >/dev/null ; \\
+	cd target/release && \\
+		tar -czf phaeton-v$$VERSION-macos-arm64.tar.gz phaeton && \\
+		mv phaeton-v$$VERSION-macos-arm64.tar.gz ../../../dist/ ; \\
+	cd - >/dev/null ; \\
+	echo "Release packages created in dist/ directory (version $$VERSION)"
 
 # Security audit
 audit:

@@ -101,8 +101,19 @@ fi
 
 print_success "Cross-compilation tools installed successfully!"
 
-# Create dist directory
+# Create dist directory and derive version
 mkdir -p dist
+
+# Determine version from Cargo.toml or git tag
+VERSION=${PHAETON_VERSION:-$(grep -m1 '^version\s*=\s*"' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')}
+if git describe --tags --abbrev=0 >/dev/null 2>&1; then
+    GIT_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
+    # Prefer tag that matches Cargo version (vX.Y.Z)
+    if [[ $GIT_TAG == v$VERSION* ]]; then
+        VERSION=${GIT_TAG#v}
+    fi
+fi
+print_status "Using version: $VERSION"
 
 # Function to build and package for a target
 build_target() {
@@ -116,7 +127,7 @@ build_target() {
 
         # Create tarball
         local binary_path="target/$target/release/phaeton"
-        local archive_name="phaeton-$target.tar.gz"
+        local archive_name="phaeton-v${VERSION}-$target.tar.gz"
 
         if [[ -f "$binary_path" ]]; then
             cd "target/$target/release"
@@ -155,9 +166,9 @@ if cargo build --release --verbose; then
     print_success "Successfully built for macOS ARM64"
 
     cd target/release
-    tar -czf "../../dist/phaeton-macos-arm64.tar.gz" phaeton
+    tar -czf "../../dist/phaeton-v${VERSION}-macos-arm64.tar.gz" phaeton
     cd ../..
-    print_success "Created archive: dist/phaeton-macos-arm64.tar.gz"
+    print_success "Created archive: dist/phaeton-v${VERSION}-macos-arm64.tar.gz"
 else
     print_error "Failed to build for macOS ARM64"
 fi
@@ -170,20 +181,20 @@ if [[ -d "dist" ]]; then
     ls -la dist/
 
     print_status "Summary of available binaries:"
-    if [[ -f "dist/phaeton-armv7-unknown-linux-gnueabihf.tar.gz" ]]; then
-        echo "  ✅ Cerbo GX (ARM v7): dist/phaeton-armv7-unknown-linux-gnueabihf.tar.gz"
+    if ls dist/phaeton-v${VERSION}-armv7-unknown-linux-gnueabihf.tar.gz >/dev/null 2>&1; then
+        echo "  ✅ Cerbo GX (ARM v7): dist/phaeton-v${VERSION}-armv7-unknown-linux-gnueabihf.tar.gz"
     else
         echo "  ❌ Cerbo GX (ARM v7): Not built (cross-compilation tools not available)"
     fi
 
-    if [[ -f "dist/phaeton-aarch64-unknown-linux-gnu.tar.gz" ]]; then
-        echo "  ✅ Linux ARM64: dist/phaeton-aarch64-unknown-linux-gnu.tar.gz"
+    if ls dist/phaeton-v${VERSION}-aarch64-unknown-linux-gnu.tar.gz >/dev/null 2>&1; then
+        echo "  ✅ Linux ARM64: dist/phaeton-v${VERSION}-aarch64-unknown-linux-gnu.tar.gz"
     else
         echo "  ❌ Linux ARM64: Not built (cross-compilation tools not available)"
     fi
 
-    if [[ -f "dist/phaeton-macos-arm64.tar.gz" ]]; then
-        echo "  ✅ macOS ARM64: dist/phaeton-macos-arm64.tar.gz"
+    if ls dist/phaeton-v${VERSION}-macos-arm64.tar.gz >/dev/null 2>&1; then
+        echo "  ✅ macOS ARM64: dist/phaeton-v${VERSION}-macos-arm64.tar.gz"
     else
         echo "  ❌ macOS ARM64: Build failed"
     fi
@@ -205,17 +216,17 @@ if [[ -d "dist" ]]; then
     print_status "Installation instructions:"
     echo ""
     echo "For Cerbo GX (Venus OS):"
-    echo "  1. Copy phaeton-armv7-unknown-linux-gnueabihf.tar.gz to your Cerbo GX"
-    echo "  2. Extract: tar -xzf phaeton-armv7-unknown-linux-gnueabihf.tar.gz"
+    echo "  1. Copy phaeton-v${VERSION}-armv7-unknown-linux-gnueabihf.tar.gz to your Cerbo GX"
+    echo "  2. Extract: tar -xzf phaeton-v${VERSION}-armv7-unknown-linux-gnueabihf.tar.gz"
     echo "  3. Move binary: sudo mv phaeton /usr/local/bin/"
     echo "  4. Make executable: sudo chmod +x /usr/local/bin/phaeton"
     echo ""
     echo "For Linux ARM64 systems:"
-    echo "  1. Extract: tar -xzf phaeton-aarch64-unknown-linux-gnu.tar.gz"
+    echo "  1. Extract: tar -xzf phaeton-v${VERSION}-aarch64-unknown-linux-gnu.tar.gz"
     echo "  2. Move binary: sudo mv phaeton /usr/local/bin/"
     echo "  3. Make executable: sudo chmod +x /usr/local/bin/phaeton"
     echo ""
     echo "For macOS (local):"
-    echo "  1. Extract: tar -xzf phaeton-macos-arm64.tar.gz"
+    echo "  1. Extract: tar -xzf phaeton-v${VERSION}-macos-arm64.tar.gz"
     echo "  2. The binary can be run directly: ./phaeton"
 fi
