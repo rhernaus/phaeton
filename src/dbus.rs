@@ -429,12 +429,7 @@ impl DbusService {
             .at(&self.charger_path, charger)
             .await
             .map_err(|e| PhaetonError::dbus(format!("Register object failed: {}", e)))?;
-        // Add standard Properties interface so clients can use DBus Properties.Get
-        connection
-            .object_server()
-            .at(&self.charger_path, zbus::fdo::Properties)
-            .await
-            .map_err(|e| PhaetonError::dbus(format!("Register Properties failed: {}", e)))?;
+        // Note: org.freedesktop.DBus.Properties is provided implicitly by zbus for objects
         // Also register the root '/' as a BusItem tree provider similar to VeDbusRootExport
         let root = RootBus {
             shared: Arc::clone(&self.shared),
