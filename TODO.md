@@ -9,7 +9,7 @@ This project is an EV charger driver, providing a performant, memory-safe, and m
 - **Edition**: Migrated to Rust 2024 ✅
 - **Code Quality**: Clippy clean; unit tests present for core modules ✅
 - **Build/cross**: Cross-compilation scaffolding present for ARMv7 and AArch64 ✅
-- **CI/CD**: GitHub Actions implemented ✅
+- **CI/CD**: GitHub Actions implemented (see `.github/workflows/`) ✅
 - **Dependencies**: `tokio-modbus` at 0.16.1; nested Result handling adopted ✅
 
 ## Project Structure
@@ -32,6 +32,7 @@ phaeton/
 │   ├── updater.rs         # Self-update functionality
 │   └── error.rs           # Error types and handling
 ├── tests/                 # Test modules
+├── .github/workflows/     # CI workflows (tests, audit, cross-builds, releases)
 ├── docs/                  # Documentation
 ├── Cargo.toml
 └── README.md
@@ -201,7 +202,7 @@ phaeton/
 ## 6.1 Build System
 - [x] **Configure cross-compilation** scaffolding for ARM architecture
 - [ ] **Create Docker build** environment for consistent builds
-- [ ] **Implement CI/CD pipeline** with automated testing and cross artifacts
+- [x] **Implement CI/CD pipeline** with automated testing and cross artifacts (GitHub Actions)
 - [ ] **Add binary packaging** for different target platforms
 
 ## 6.2 Monitoring & Observability

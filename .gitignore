@@ -21,3 +21,4 @@ target
 #.idea/
 
 lcov.info
+phaeton_config.yaml

@@ -133,7 +133,7 @@ cargo build --release
 
 #### GitHub Actions CI
 
-Tagging a version (e.g., `v0.1.0`) triggers a release build that uploads signed artifacts and checksums to [Releases](https://github.com/rhernaus/phaeton/releases). Pushes to `main` update the rolling `nightly` prerelease.
+Tagging a version (e.g., `v0.1.0`) triggers a release build that uploads signed artifacts and checksums to [Releases](https://github.com/rhernaus/phaeton/releases). Pushes to `main` update the rolling `nightly` prerelease. CI workflows live under `.github/workflows/` and cover testing, linting, security audit, cross-compilation, and release publishing.
 
 #### Manual Cross-Compilation
 
@@ -174,6 +174,13 @@ cargo build --target x86_64-unknown-linux-gnu --release
 ```
 
 
+
+### CI/CD
+
+- Workflows are defined in `.github/workflows/`.
+- On pull requests and pushes: run tests, clippy, fmt check, and `cargo audit`.
+- On tag (e.g., `v0.x.y`): build cross-compiled artifacts (ARMv7, AArch64, x86_64), generate `SHA256SUMS`, and publish to Releases.
+- Nightly prerelease is updated from `main`.
 
 ## Architecture
 
@@ -304,4 +311,4 @@ CMD ["phaeton"]
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under MIT or Apache-2.0; see the LICENSE files for details.
