@@ -29,16 +29,19 @@ jobs:
       - name: Lint (clippy)
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Run tests
-        run: cargo test --all --locked --verbose
-
       - name: Install llvm-tools and cargo-llvm-cov
         run: |
           rustup component add llvm-tools-preview
           cargo install cargo-llvm-cov --locked
 
+      - name: Clean coverage artifacts
+        run: cargo llvm-cov clean --workspace
+
+      - name: Run coverage tests (no report)
+        run: cargo llvm-cov --workspace --all-features --no-report
+
       - name: Generate code coverage (lcov)
-        run: cargo llvm-cov --workspace --all-features --lcov --output-path lcov.info
+        run: cargo llvm-cov report --lcov --output-path lcov.info
 
       - name: Generate code coverage (html)
         run: cargo llvm-cov report --html
