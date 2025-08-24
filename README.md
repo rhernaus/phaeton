@@ -18,33 +18,34 @@ A high-performance EV charger driver for Victron Venus OS, providing seamless in
 
 ### Download prebuilt binaries (recommended)
 
-Grab the latest binaries from [Releases](https://github.com/your-org/phaeton/releases):
+Grab the latest binaries from [Releases](https://github.com/rhernaus/phaeton/releases).
+Artifacts are named with the GitHub release tag:
 
-- **Cerbo GX (ARMv7)**: `phaeton-v<version>-armv7-unknown-linux-gnueabihf.tar.gz`
-- **Linux ARM64**: `phaeton-v<version>-aarch64-unknown-linux-gnu.tar.gz`
-- **Linux AMD64**: `phaeton-v<version>-x86_64-unknown-linux-gnu.tar.gz`
+- **Cerbo GX (ARMv7)**: `phaeton-<tag>-armv7-unknown-linux-gnueabihf.tar.gz`
+- **Linux ARM64**: `phaeton-<tag>-aarch64-unknown-linux-gnu.tar.gz`
+- **Linux AMD64**: `phaeton-<tag>-x86_64-unknown-linux-gnu.tar.gz`
 
 Verify checksums (Linux):
 
 ```bash
-curl -L -O https://github.com/your-org/phaeton/releases/download/<tag>/SHA256SUMS
-curl -L -O https://github.com/your-org/phaeton/releases/download/<tag>/phaeton-v<version>-<artifact>.tar.gz
+curl -L -O https://github.com/rhernaus/phaeton/releases/download/<tag>/SHA256SUMS
+curl -L -O https://github.com/rhernaus/phaeton/releases/download/<tag>/phaeton-<tag>-<artifact>.tar.gz
 sha256sum -c SHA256SUMS
 ```
 
 Verify on Linux AMD64:
 
 ```bash
-curl -L -O https://github.com/your-org/phaeton/releases/download/<tag>/SHA256SUMS
-curl -L -O https://github.com/your-org/phaeton/releases/download/<tag>/phaeton-v<version>-x86_64-unknown-linux-gnu.tar.gz
-sha256sum phaeton-v<version>-x86_64-unknown-linux-gnu.tar.gz
-grep phaeton-v<version>-x86_64-unknown-linux-gnu.tar.gz SHA256SUMS
+curl -L -O https://github.com/rhernaus/phaeton/releases/download/<tag>/SHA256SUMS
+curl -L -O https://github.com/rhernaus/phaeton/releases/download/<tag>/phaeton-<tag>-x86_64-unknown-linux-gnu.tar.gz
+sha256sum phaeton-<tag>-x86_64-unknown-linux-gnu.tar.gz
+grep phaeton-<tag>-x86_64-unknown-linux-gnu.tar.gz SHA256SUMS
 ```
 
 Install:
 
 ```bash
-tar -xzf phaeton-v<version>-<artifact>.tar.gz
+tar -xzf phaeton-<tag>-<artifact>.tar.gz
 sudo install -m 0755 phaeton /usr/local/bin/phaeton
 ```
 
@@ -66,7 +67,7 @@ Nightly builds are published to the rolling `nightly` prerelease for early testi
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/phaeton.git
+git clone https://github.com/rhernaus/phaeton.git
 cd phaeton
 
 # Build the project
@@ -105,30 +106,23 @@ cargo fmt --check
 
 # Run security audit
 cargo audit
-
-# Make build script executable
-chmod +x build.sh
 ```
 
 ### Cross-Compilation
 
 Phaeton supports cross-compilation for multiple architectures to run on different systems:
 
-#### Quick Build Script (Recommended)
+#### Local Builds
+
+On developer machines, build only for the current host:
 
 ```bash
-# Build for all supported platforms
-./build.sh
+cargo build --release
 ```
-
-This will create release binaries in the `dist/` directory for:
-- **Cerbo GX (ARM v7)**: `phaeton-v<version>-armv7-unknown-linux-gnueabihf.tar.gz`
-- **Linux ARM64**: `phaeton-v<version>-aarch64-unknown-linux-gnu.tar.gz`
-- **Linux AMD64**: `phaeton-v<version>-x86_64-unknown-linux-gnu.tar.gz`
 
 #### GitHub Actions CI
 
-Tagging a version (e.g., `v0.1.0`) triggers a release build that uploads signed artifacts and checksums to [Releases](https://github.com/your-org/phaeton/releases). Pushes to `main` update the rolling `nightly` prerelease.
+Tagging a version (e.g., `v0.1.0`) triggers a release build that uploads signed artifacts and checksums to [Releases](https://github.com/rhernaus/phaeton/releases). Pushes to `main` update the rolling `nightly` prerelease.
 
 #### Manual Cross-Compilation
 
@@ -168,23 +162,7 @@ cargo build --target aarch64-unknown-linux-gnu --release
 cargo build --target x86_64-unknown-linux-gnu --release
 ```
 
-#### Using Make
 
-```bash
-# Show all available targets
-make help
-
-# Cross-compile for specific targets
-make cross-build-armv7    # Cerbo GX (ARM v7)
-make cross-build-arm64    # Linux ARM64
-make cross-build-amd64    # Linux AMD64
-
-# Build all targets and create packages
-make package-release
-
-# Run all quality checks
-make quality
-```
 
 ## Architecture
 
@@ -195,7 +173,7 @@ The application follows a modular architecture with clear separation of concerns
 - `modbus`: Modbus TCP client for charger communication
 - `driver`: Core driver logic and state management
 - `dbus`: D-Bus integration for Venus OS
-- `web_axum`: HTTP server and REST API (Axum + OpenAPI)
+- `web`: HTTP server and REST API (Axum + OpenAPI)
 - `persistence`: State persistence and recovery
 - `session`: Charging session management
 - `controls`: Charging control algorithms

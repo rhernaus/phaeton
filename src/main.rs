@@ -1,6 +1,6 @@
 use anyhow::Result;
 use phaeton::driver::{AlfenDriver, DriverCommand};
-use phaeton::web_axum;
+use phaeton::web;
 use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc};
 use tracing::{error, info};
@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
             let drv = axum_driver.lock().await;
             (drv.config().web.host.clone(), drv.config().web.port)
         };
-        if let Err(e) = web_axum::serve(axum_driver.clone(), &host, port).await {
+        if let Err(e) = web::serve(axum_driver.clone(), &host, port).await {
             error!("Axum server error: {}", e);
         }
     });

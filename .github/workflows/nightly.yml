@@ -62,10 +62,12 @@ jobs:
       - name: Package artifacts
         run: |
           mkdir -p dist
-          VERSION=$(grep -m1 '^version\s*=\s*"' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
-          tar -czf dist/phaeton-v${VERSION}-armv7-unknown-linux-gnueabihf.tar.gz -C target/armv7-unknown-linux-gnueabihf/release phaeton
-          tar -czf dist/phaeton-v${VERSION}-aarch64-unknown-linux-gnu.tar.gz -C target/aarch64-unknown-linux-gnu/release phaeton
-          tar -czf dist/phaeton-v${VERSION}-x86_64-unknown-linux-gnu.tar.gz -C target/x86_64-unknown-linux-gnu/release phaeton
+          # For nightly, we still embed the tag name in artifacts for consistency.
+          # The release below uses a fixed 'nightly' tag; artifact names keep 'nightly'.
+          TAG_NAME="nightly"
+          tar -czf dist/phaeton-${TAG_NAME}-armv7-unknown-linux-gnueabihf.tar.gz -C target/armv7-unknown-linux-gnueabihf/release phaeton
+          tar -czf dist/phaeton-${TAG_NAME}-aarch64-unknown-linux-gnu.tar.gz -C target/aarch64-unknown-linux-gnu/release phaeton
+          tar -czf dist/phaeton-${TAG_NAME}-x86_64-unknown-linux-gnu.tar.gz -C target/x86_64-unknown-linux-gnu/release phaeton
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -103,9 +105,9 @@ jobs:
           prerelease: true
           make_latest: false
           files: |
-            dist/phaeton-v*-armv7-unknown-linux-gnueabihf.tar.gz
-            dist/phaeton-v*-aarch64-unknown-linux-gnu.tar.gz
-            dist/phaeton-v*-x86_64-unknown-linux-gnu.tar.gz
+            dist/phaeton-nightly-armv7-unknown-linux-gnueabihf.tar.gz
+            dist/phaeton-nightly-aarch64-unknown-linux-gnu.tar.gz
+            dist/phaeton-nightly-x86_64-unknown-linux-gnu.tar.gz
             dist/SHA256SUMS
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
