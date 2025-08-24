@@ -4,15 +4,24 @@ A high-performance EV charger driver for Victron Venus OS, providing seamless in
 
 ## Features
 
+### Implemented
+
 - **High Performance**: Async-first design with Tokio runtime
 - **Memory Safe**: Rust's ownership system prevents common bugs
-- **Modbus TCP**: Direct communication with EV chargers
-- **D-Bus Integration**: Full Venus OS compatibility
-- **Web Interface**: REST API and static file serving (Axum)
-- **Dynamic Pricing**: Tibber API integration for smart charging
-- **Vehicle Integration**: Tesla and Kia API support
-- **Self-Updates**: Git-based automatic updates
-- **Configuration**: YAML-based configuration with validation
+- **Modbus TCP**: Async client with reconnect/backoff and decoding utilities
+- **Web Interface**: Axum REST API, SSE events, logs endpoints; static UI served under `/ui` and `/app`; OpenAPI at `/openapi.json` and Swagger UI at `/docs`
+- **D-Bus Integration (partial)**: Service registration and `com.victronenergy.BusItem` exposure for core paths; writable controls map to driver commands
+- **Sessions & Persistence**: Session tracking, stats, and persistence across restarts; optional static pricing for session cost
+- **Configuration**: YAML configuration with validation; schema exposed at `/api/config/schema`
+- **Logging**: Structured logging with rotation; context-rich tracing
+
+### Planned / In progress
+
+- **Dynamic Pricing (Tibber)**: API client and pricing strategies
+- **Vehicle Integration**: Tesla and Kia clients
+- **Self-Updates**: Git-based update check/apply
+- **D-Bus**: Export full object tree and broader Venus OS parity
+- **Security**: Authentication/authorization and rate limiting for the web API
 
 ## Quick Start
 
@@ -91,6 +100,8 @@ Phaeton will automatically look for a configuration file at the following locati
 - `./phaeton_config.yaml`
 - `/data/phaeton_config.yaml`
 - `/etc/phaeton/config.yaml`
+
+You can also retrieve the JSON schema via the API at `/api/config/schema`.
 
 ### Development
 
@@ -211,6 +222,18 @@ The application follows a modular architecture with clear separation of concerns
 ### Static Web UI
 
 - UI assets are served under `/ui` (and `/app` as an alias for compatibility)
+
+### Security
+
+- The HTTP API currently has no authentication and enables permissive CORS for development.
+- Deploy behind a trusted network or reverse proxy that enforces authentication.
+- Log file path defaults to `/var/log/phaeton.log`; ensure appropriate permissions.
+
+### Known limitations
+
+- Tibber, vehicle integrations, and updater are stubbed (not yet implemented).
+- D-Bus export is functional for core paths but not yet complete for all Venus OS paths.
+- API is unauthenticated; do not expose directly to untrusted networks.
 
 ## Configuration
 

@@ -7,10 +7,10 @@ This project is an EV charger driver, providing a performant, memory-safe, and m
 - **Project initialized**: ✅ Basic Rust project structure created
 - **Phase**: Foundation setup (Phase 1) - **COMPLETED** ✅
 - **Edition**: Migrated to Rust 2024 ✅
-- **Code Quality**: Clippy clean with zero warnings ✅
-- **Build/cross**: Cross-compilation profiles present for ARMv7 and AArch64 ✅
-- **CI/CD**: GitHub Actions configured (tests, audit, builds, cross artifacts)
-- **Dependencies**: Upgraded `tokio-modbus` to 0.16.1; API adapted ✅
+- **Code Quality**: Clippy clean; unit tests present for core modules ✅
+- **Build/cross**: Cross-compilation scaffolding present for ARMv7 and AArch64 ✅
+- **CI/CD**: GitHub Actions planned; local tests and benches available
+- **Dependencies**: `tokio-modbus` at 0.16.1; nested Result handling adopted ✅
 
 ## Project Structure
 ```
@@ -111,7 +111,7 @@ phaeton/
   - Scheduled mode (timezone-aware windows) ✅
 - [x] **Add state persistence** for mode/start/stop/set_current + session snapshot
 - [ ] **Implement watchdog mechanisms** for fault tolerance
-- [ ] **Create event system** for status changes and notifications
+- [ ] **Create event system** for status changes and notifications (beyond SSE)
 - [x] **Wire persistence and sessions** into the driver run loop
 - [ ] **Implement status mapping parity** (e.g., LOW_SOC, WAIT_* states)
 
@@ -127,33 +127,20 @@ phaeton/
 # Phase 3: System Integration (Priority: High) 🚧
 
 ## 3.1 D-Bus Integration
-- [x] **Implement D-Bus client** using `zbus` for Venus OS integration
-- [x] **Create service registration** with proper naming conventions
-- [ ] **Implement D-Bus paths** for all required interfaces (export real object tree; currently cached only):
-  - `/Mode`, `/StartStop`, `/SetCurrent`
-  - `/Ac/Voltage`, `/Ac/Current`, `/Ac/Power`
-  - `/Ac/Energy/Forward`, `/ChargingTime`
-  - `/DeviceInstance`, `/ProductName`, `/FirmwareVersion`, `/Serial`
-  - Per-phase metrics: `/Ac/L1|L2|L3/Voltage`, `/Ac/L1|L2|L3/Current`, `/Ac/L1|L2|L3/Power`
-  - Other: `/Ac/PhaseCount`, `/Current`, `/Status`
-  - Vehicle information paths: `/Vehicle/Provider`, `/Vehicle/Name`, `/Vehicle/VIN`, `/Vehicle/Soc`, `/Vehicle/Lat`, `/Vehicle/Lon`, `/Vehicle/Asleep`, `/Vehicle/Timestamp`
-- [x] **Add callback handling scaffolding** for control operations (internal driver callbacks)
+- [x] **Implement D-Bus service** using `zbus` and acquire name `com.victronenergy.evcharger.phaeton_<instance>`
+- [x] **Expose `com.victronenergy.BusItem`** for core/writable paths mapped to driver commands
+- [x] **Cache and update common paths** via internal store with `BusItem` getters
+- [ ] **Export complete object tree** with properties for all Venus OS paths (beyond cached reflection)
 - [ ] **Implement Victron energy rate detection** from system D-Bus
 
 ## 3.2 Web Server & API
 - [x] **Migrate web framework**: fully migrated from `warp` to `axum` (no legacy code)
-- [x] **Create REST API endpoints** (initial set):
-  - `GET /api/status` - Current system status
-  - `POST /api/mode` - Mode switching
-  - `POST /api/startstop` - Start/stop charging
-  - `POST /api/set_current` - Current adjustment
-  - `GET /api/config` - Get configuration
-  - `PUT /api/config` - Update configuration
-- [x] **Add remaining endpoints** for updates, logs, schema
-- [x] **Serve static UI** under `/ui` (alias `/app`) (web assets)
-- [x] **Implement real-time updates** via SSE (`GET /api/events`)
-- [x] **Add CORS middleware** for local development
-- [x] **Create API documentation** with OpenAPI/Swagger (OpenAPI at `/openapi.json`, Swagger UI at `/docs`)
+- [x] **Create REST API**: status, mode, start/stop, set current, config get/put, config schema
+- [x] **Logs endpoints**: head, tail, download
+- [x] **Updates endpoints**: status/check/apply (backed by stubs)
+- [x] **SSE** at `/api/events` for live status
+- [x] **Static UI** under `/ui` and alias `/app`
+- [x] **OpenAPI/Swagger** at `/openapi.json` and `/docs`
 
 ---
 
@@ -162,10 +149,7 @@ phaeton/
 ## 4.1 Tibber Integration
 - [ ] **Implement Tibber API client** using `reqwest`
 - [ ] **Create price data fetching** with proper authentication
-- [ ] **Implement pricing strategies**:
-  - Level-based (CHEAP, VERY_CHEAP)
-  - Threshold-based pricing
-  - Percentile-based pricing
+- [ ] **Implement pricing strategies**: level, threshold, percentile
 - [ ] **Add hourly price overview** generation
 - [ ] **Implement price caching** and offline fallbacks
 
@@ -189,7 +173,7 @@ phaeton/
 # Phase 5: Testing & Quality Assurance (Priority: Medium) 🚧
 
 ## 5.1 Unit Testing
-- [ ] **Create comprehensive unit tests** for all modules
+- [x] **Core unit tests**: controls, modbus utils, persistence, error types, sessions, tibber stub, updater stub
 - [ ] **Add mock implementations** for external dependencies:
   - Modbus client mocks
   - D-Bus service mocks
@@ -204,7 +188,8 @@ phaeton/
 - [ ] **Create hardware-in-the-loop tests** for Modbus communication
 
 ## 5.3 Documentation & Validation
-- [ ] **Write API documentation** with examples
+- [x] **OpenAPI generated** and Swagger UI served
+- [ ] **Write narrative API docs** with examples
 - [ ] **Create deployment guides** for Venus OS
 - [ ] **Add configuration reference** with all options
 - [ ] **Create troubleshooting guide** for common issues
@@ -214,14 +199,14 @@ phaeton/
 # Phase 6: Deployment & Operations (Priority: Low) 🚧
 
 ## 6.1 Build System
-- [x] **Configure cross-compilation** for ARM architecture
+- [x] **Configure cross-compilation** scaffolding for ARM architecture
 - [ ] **Create Docker build** environment for consistent builds
-- [x] **Implement CI/CD pipeline** with automated testing
+- [ ] **Implement CI/CD pipeline** with automated testing and cross artifacts
 - [ ] **Add binary packaging** for different target platforms
 
 ## 6.2 Monitoring & Observability
 - [ ] **Add Prometheus metrics** for system monitoring
-- [ ] **Implement health check endpoints** for load balancers
+- [x] **Health check endpoint** (`GET /api/health`)
 - [ ] **Create performance profiling** capabilities
 - [ ] **Add structured logging** to external systems
 
@@ -277,4 +262,6 @@ phaeton/
 14. ✅ Vendor `git2`/OpenSSL to simplify cross-compilation
 
 ## Next Phase Ready
-**Phase 3: System Integration** - D‑Bus name acquisition complete; next is exporting real properties and wiring more web endpoints. SSE/OpenAPI/Swagger in place; continue with richer D‑Bus and pricing integrations.
+**Phase 3: System Integration**
+- Expand D‑Bus property export to full object tree
+- Keep enriching web API (auth, rate limiting) and wire real updater/Tibber backends
