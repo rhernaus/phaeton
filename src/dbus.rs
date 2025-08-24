@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use zbus::object_server::InterfaceRef;
-use zbus::zvariant::{OwnedObjectPath, OwnedValue};
+use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 use zbus::{Connection, Result as ZbusResult, names::WellKnownName};
 
 #[derive(Default)]
@@ -538,7 +538,7 @@ impl BusItem {
         Self { path, shared }
     }
 
-    fn serde_to_owned_value(v: &serde_json::Value) -> OwnedValue {
+    pub(crate) fn serde_to_owned_value(v: &serde_json::Value) -> OwnedValue {
         match v {
             serde_json::Value::Null => OwnedValue::from(0i64),
             serde_json::Value::Bool(b) => OwnedValue::from(*b),
@@ -551,13 +551,13 @@ impl BusItem {
                     OwnedValue::from(n.as_f64().unwrap_or(0.0))
                 }
             }
-            // Fallback: map strings and other complex types to 0
-            serde_json::Value::String(_) => OwnedValue::from(0i64),
+            serde_json::Value::String(s) => OwnedValue::try_from(Value::from(s.as_str()))
+                .unwrap_or_else(|_| OwnedValue::from(0i64)),
             _ => OwnedValue::from(0i64),
         }
     }
 
-    fn owned_value_to_serde(v: &OwnedValue) -> serde_json::Value {
+    pub(crate) fn owned_value_to_serde(v: &OwnedValue) -> serde_json::Value {
         if let Ok(b) = <bool as TryFrom<&OwnedValue>>::try_from(v) {
             return serde_json::json!(b);
         }
@@ -648,5 +648,20 @@ impl BusItem {
             serde_json::Value::Bool(b) => b.to_string(),
             _ => val.to_string(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serde_string_is_mapped_to_dbus_string() {
+        let json_val = serde_json::json!("Phaeton EV Charger");
+        let owned = BusItem::serde_to_owned_value(&json_val);
+
+        // Ensure it is represented as a D-Bus string and round-trips back
+        let back = BusItem::owned_value_to_serde(&owned);
+        assert_eq!(back, json_val);
     }
 }
