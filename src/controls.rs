@@ -143,6 +143,11 @@ impl ChargingControls {
         let m = parts[1].parse::<u32>().unwrap_or(0) % 60;
         h * 60 + m
     }
+
+    /// Public helper to check if any schedule window is currently active
+    pub fn is_schedule_active(config: &crate::config::Config) -> bool {
+        Self::is_within_any_schedule(config)
+    }
 }
 
 #[cfg(test)]

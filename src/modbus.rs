@@ -362,11 +362,30 @@ impl ModbusConnectionManager {
                 && let Err(e) = self.client.connect().await
             {
                 attempts += 1;
-                if attempts >= self.max_retry_attempts {
+                // If max_retry_attempts == 0, retry indefinitely
+                if self.max_retry_attempts > 0 && attempts >= self.max_retry_attempts {
+                    self.logger.error(&format!(
+                        "Modbus connect failed after {} attempts: {} (giving up)",
+                        attempts, e
+                    ));
                     return Err(e);
                 }
-                self.logger
-                    .warn(&format!("Connection attempt {} failed: {}", attempts, e));
+                // Escalate every 10th attempt to error for visibility
+                if attempts % 10 == 0 {
+                    self.logger.error(&format!(
+                        "Modbus connect attempt {} failed: {} (will retry in {:.1}s)",
+                        attempts,
+                        e,
+                        self.retry_delay.as_secs_f64()
+                    ));
+                } else {
+                    self.logger.warn(&format!(
+                        "Modbus connect attempt {} failed: {} (will retry in {:.1}s)",
+                        attempts,
+                        e,
+                        self.retry_delay.as_secs_f64()
+                    ));
+                }
                 sleep(self.retry_delay).await;
                 continue;
             }
@@ -377,13 +396,30 @@ impl ModbusConnectionManager {
                 Err(e) => {
                     // Check if it's a connection error that requires reconnection
                     if Self::is_connection_error(&e) {
-                        self.logger
-                            .warn(&format!("Operation failed due to connection error: {}", e));
-                        self.client.disconnect().await.ok(); // Ignore disconnect errors
                         attempts += 1;
-                        if attempts >= self.max_retry_attempts {
+                        if self.max_retry_attempts > 0 && attempts >= self.max_retry_attempts {
+                            self.logger.error(&format!(
+                                "Operation failed due to connection error after {} attempts: {} (giving up)",
+                                attempts, e
+                            ));
                             return Err(e);
                         }
+                        if attempts % 10 == 0 {
+                            self.logger.error(&format!(
+                                "Operation failed due to connection error (attempt {}): {} (retrying in {:.1}s)",
+                                attempts,
+                                e,
+                                self.retry_delay.as_secs_f64()
+                            ));
+                        } else {
+                            self.logger.warn(&format!(
+                                "Operation failed due to connection error (attempt {}): {} (retrying in {:.1}s)",
+                                attempts,
+                                e,
+                                self.retry_delay.as_secs_f64()
+                            ));
+                        }
+                        self.client.disconnect().await.ok(); // Ignore disconnect errors
                         sleep(self.retry_delay).await;
                         continue;
                     } else {

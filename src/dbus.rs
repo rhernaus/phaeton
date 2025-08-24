@@ -45,6 +45,9 @@ struct EvChargerValues {
     status: u32,
     charging_time: i64,
     position: u8,
+    enable_display: u8,
+    auto_start: u8,
+    model: String,
 }
 
 struct EvCharger {
@@ -185,6 +188,21 @@ impl EvCharger {
         self.values.lock().unwrap().position
     }
 
+    #[zbus(property)]
+    fn enable_display(&self) -> u8 {
+        self.values.lock().unwrap().enable_display
+    }
+
+    #[zbus(property)]
+    fn auto_start(&self) -> u8 {
+        self.values.lock().unwrap().auto_start
+    }
+
+    #[zbus(property)]
+    fn model(&self) -> String {
+        self.values.lock().unwrap().model.clone()
+    }
+
     // Property setters to control the driver
     #[zbus(property)]
     fn set_mode(&self, mode: u8) -> zbus::Result<()> {
@@ -270,7 +288,7 @@ impl DbusService {
             let mut shared = self.shared.lock().unwrap();
             shared.paths.insert(
                 "/ProductName".to_string(),
-                serde_json::json!("Phaeton EV Charger"),
+                serde_json::json!("Alfen EV Charger"),
             );
             shared
                 .paths
@@ -290,6 +308,15 @@ impl DbusService {
             shared
                 .paths
                 .insert("/Ac/PhaseCount".to_string(), serde_json::json!(0));
+            shared
+                .paths
+                .insert("/EnableDisplay".to_string(), serde_json::json!(0u8));
+            shared
+                .paths
+                .insert("/AutoStart".to_string(), serde_json::json!(0u8));
+            shared
+                .paths
+                .insert("/Model".to_string(), serde_json::json!("AC22NS"));
         }
 
         // Register charger interface at path
@@ -356,7 +383,12 @@ impl DbusService {
 
     /// Update a D-Bus path value (local cache and reflective properties)
     pub async fn update_path(&mut self, path: &str, value: serde_json::Value) -> Result<()> {
-        self.logger.debug(&format!("DBus set {} = {}", path, value));
+        // Elevate important identity/management paths to INFO level for visibility
+        match path {
+            "/DeviceInstance" | "/ProductName" | "/ProductId" | "/FirmwareVersion" | "/Serial"
+            | "/Status" => self.logger.info(&format!("DBus set {} = {}", path, value)),
+            _ => self.logger.debug(&format!("DBus set {} = {}", path, value)),
+        };
         // Ensure BusItem exists, default not writable
         let _ = self.ensure_item(path, value.clone(), false).await;
 
@@ -538,6 +570,24 @@ impl DbusService {
                     if let Some(v) = value.as_u64() {
                         let obj = iface.get_mut().await;
                         obj.values.lock().unwrap().position = v as u8;
+                    }
+                }
+                "/EnableDisplay" => {
+                    if let Some(v) = value.as_u64() {
+                        let obj = iface.get_mut().await;
+                        obj.values.lock().unwrap().enable_display = v as u8;
+                    }
+                }
+                "/AutoStart" => {
+                    if let Some(v) = value.as_u64() {
+                        let obj = iface.get_mut().await;
+                        obj.values.lock().unwrap().auto_start = v as u8;
+                    }
+                }
+                "/Model" => {
+                    if let Some(v) = value.as_str() {
+                        let obj = iface.get_mut().await;
+                        obj.values.lock().unwrap().model = v.to_string();
                     }
                 }
                 _ => {}

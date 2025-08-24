@@ -183,187 +183,11 @@ impl AlfenDriver {
         // Update state to running
         self.state.send(DriverState::Running).ok();
 
-        // Initialize D-Bus service and start
-        let mut dbus =
-            DbusService::new(self.config.device_instance, self.commands_tx.clone()).await?;
-        dbus.start().await?;
-        self.dbus = Some(dbus);
-
         // Initialize control state from config defaults
         self.intended_set_current = self.config.defaults.intended_set_current;
         self.station_max_current = self.config.defaults.station_max_current;
-        if let Some(dbus) = &mut self.dbus {
-            // Register mandatory VeDbus paths with defaults
-            let conn_str = format!(
-                "Modbus TCP at {}:{}",
-                self.config.modbus.ip, self.config.modbus.port
-            );
-            let _ = dbus
-                .ensure_item("/Mgmt/ProcessName", serde_json::json!("phaeton"), false)
-                .await;
-            let _ = dbus
-                .ensure_item(
-                    "/Mgmt/ProcessVersion",
-                    serde_json::json!(env!("CARGO_PKG_VERSION")),
-                    false,
-                )
-                .await;
-            let _ = dbus
-                .ensure_item("/Mgmt/Connection", serde_json::json!(conn_str), false)
-                .await;
-
-            let _ = dbus
-                .ensure_item(
-                    "/DeviceInstance",
-                    serde_json::json!(self.config.device_instance),
-                    false,
-                )
-                .await;
-            let _ = dbus
-                .ensure_item("/Connected", serde_json::json!(1), false)
-                .await;
-            let _ = dbus
-                .ensure_item(
-                    "/ProductName",
-                    serde_json::json!("Phaeton EV Charger"),
-                    false,
-                )
-                .await;
-            let _ = dbus
-                .ensure_item("/ProductId", serde_json::json!(0xC024u32), false)
-                .await;
-            let _ = dbus
-                .ensure_item("/FirmwareVersion", serde_json::json!("Unknown"), false)
-                .await;
-            let _ = dbus
-                .ensure_item("/Serial", serde_json::json!("Unknown"), false)
-                .await;
-            let _ = dbus
-                .ensure_item("/Status", serde_json::json!(0), false)
-                .await;
-            // Writable controls
-            let _ = dbus
-                .ensure_item("/Mode", serde_json::json!(self.current_mode as u8), true)
-                .await;
-            let _ = dbus
-                .ensure_item("/StartStop", serde_json::json!(self.start_stop as u8), true)
-                .await;
-            let _ = dbus
-                .ensure_item(
-                    "/SetCurrent",
-                    serde_json::json!(self.intended_set_current),
-                    true,
-                )
-                .await;
-            // Limits and metrics
-            let _ = dbus
-                .ensure_item(
-                    "/MaxCurrent",
-                    serde_json::json!(self.station_max_current),
-                    false,
-                )
-                .await;
-            let _ = dbus
-                .ensure_item("/ChargingTime", serde_json::json!(0i64), false)
-                .await;
-            let _ = dbus
-                .ensure_item("/Current", serde_json::json!(0.0), false)
-                .await;
-            let _ = dbus
-                .ensure_item("/Ac/Current", serde_json::json!(0.0), false)
-                .await;
-            let _ = dbus
-                .ensure_item("/Ac/Power", serde_json::json!(0.0), false)
-                .await;
-            let _ = dbus
-                .ensure_item("/Ac/Energy/Forward", serde_json::json!(0.0), false)
-                .await;
-            let _ = dbus
-                .ensure_item("/Ac/PhaseCount", serde_json::json!(0u8), false)
-                .await;
-            let _ = dbus
-                .ensure_item("/Ac/L1/Voltage", serde_json::json!(0.0), false)
-                .await;
-            let _ = dbus
-                .ensure_item("/Ac/L2/Voltage", serde_json::json!(0.0), false)
-                .await;
-            let _ = dbus
-                .ensure_item("/Ac/L3/Voltage", serde_json::json!(0.0), false)
-                .await;
-            let _ = dbus
-                .ensure_item("/Ac/L1/Current", serde_json::json!(0.0), false)
-                .await;
-            let _ = dbus
-                .ensure_item("/Ac/L2/Current", serde_json::json!(0.0), false)
-                .await;
-            let _ = dbus
-                .ensure_item("/Ac/L3/Current", serde_json::json!(0.0), false)
-                .await;
-            let _ = dbus
-                .ensure_item("/Ac/L1/Power", serde_json::json!(0.0), false)
-                .await;
-            let _ = dbus
-                .ensure_item("/Ac/L2/Power", serde_json::json!(0.0), false)
-                .await;
-            let _ = dbus
-                .ensure_item("/Ac/L3/Power", serde_json::json!(0.0), false)
-                .await;
-            // Position (writable per Python, but no-op here)
-            let _ = dbus
-                .ensure_item("/Position", serde_json::json!(0u8), true)
-                .await;
-            // Vehicle subtree (optional)
-            let _ = dbus
-                .ensure_item("/Vehicle/Provider", serde_json::json!(""), false)
-                .await;
-            let _ = dbus
-                .ensure_item("/Vehicle/Name", serde_json::json!(""), false)
-                .await;
-            let _ = dbus
-                .ensure_item("/Vehicle/VIN", serde_json::json!(""), false)
-                .await;
-            let _ = dbus
-                .ensure_item("/Vehicle/Soc", serde_json::json!(0.0), false)
-                .await;
-            let _ = dbus
-                .ensure_item("/Vehicle/Lat", serde_json::json!(0.0), false)
-                .await;
-            let _ = dbus
-                .ensure_item("/Vehicle/Lon", serde_json::json!(0.0), false)
-                .await;
-            let _ = dbus
-                .ensure_item("/Vehicle/Asleep", serde_json::json!(0u8), false)
-                .await;
-            let _ = dbus
-                .ensure_item("/Vehicle/Timestamp", serde_json::json!(0u64), false)
-                .await;
-
-            // Seed a few initial values via update
-            let _ = dbus
-                .update_paths([
-                    (
-                        "/DeviceInstance".to_string(),
-                        serde_json::json!(self.config.device_instance),
-                    ),
-                    (
-                        "/ProductName".to_string(),
-                        serde_json::json!("Phaeton EV Charger"),
-                    ),
-                    (
-                        "/Mode".to_string(),
-                        serde_json::json!(self.current_mode as u8),
-                    ),
-                    (
-                        "/StartStop".to_string(),
-                        serde_json::json!(self.start_stop as u8),
-                    ),
-                    (
-                        "/SetCurrent".to_string(),
-                        serde_json::json!(self.intended_set_current),
-                    ),
-                ])
-                .await;
-        }
+        // Attempt to start D-Bus service only after we have identity values, to avoid publishing defaults
+        let _ = self.try_start_dbus_with_identity().await;
 
         // Main polling loop
         let mut poll_interval = interval(Duration::from_millis(self.config.poll_interval_ms));
@@ -551,14 +375,31 @@ impl AlfenDriver {
                 };
                 let energy_kwh = energy_wh / 1000.0;
 
-                let status_u8 = match status_regs {
+                let status_base = match status_regs {
                     Some(v) if v.len() >= 5 => {
                         let s = decode_string(&v[0..5], None).unwrap_or_default();
                         Self::map_alfen_status_to_victron(&s) as i32
                     }
                     _ => 0,
                 };
-                let status = status_u8 as i32;
+                // Derive extended status: 4=WAIT_SUN, 6=WAIT_START, 7=LOW_SOC (approximate)
+                let mut status = status_base;
+                let connected = status_base == 1 || status_base == 2;
+                if connected {
+                    if matches!(self.start_stop, StartStopState::Stopped) {
+                        status = 6; // WAIT_START
+                    } else if matches!(self.current_mode, ChargingMode::Auto) {
+                        // If Auto mode and very low effective/last current, WAIT_SUN
+                        if self.last_sent_current < 0.1 {
+                            status = 4; // WAIT_SUN
+                        }
+                    } else if matches!(self.current_mode, ChargingMode::Scheduled) {
+                        // If not within schedule, WAIT_START
+                        if !crate::controls::ChargingControls::is_schedule_active(&self.config) {
+                            status = 6;
+                        }
+                    }
+                }
 
                 (l1_v, l2_v, l3_v, l1_i, l2_i, l3_i, l1_p, l2_p, l3_p, p_total, energy_kwh, status)
             };
@@ -864,6 +705,161 @@ impl AlfenDriver {
         let adjusted_consumption = (consumption - ev_power_w).max(0.0);
         let excess = (total_pv - adjusted_consumption).max(0.0);
         Some(excess as f32)
+    }
+}
+
+impl AlfenDriver {
+    /// One-shot read of charger identity values via Modbus and publish to D-Bus, with logs
+    async fn refresh_charger_identity(&mut self) -> Result<()> {
+        if self.modbus_manager.is_none() || self.dbus.is_none() {
+            return Ok(());
+        }
+
+        let manager = self.modbus_manager.as_mut().unwrap();
+
+        // Manufacturer (string)
+        let manufacturer = manager
+            .execute_with_reconnect(|client| {
+                let id = self.config.modbus.station_slave_id;
+                let addr = self.config.registers.manufacturer;
+                let cnt = self.config.registers.manufacturer_count;
+                Box::pin(async move { client.read_holding_registers(id, addr, cnt).await })
+            })
+            .await
+            .ok()
+            .map(|regs| decode_string(&regs, None).unwrap_or_default())
+            .unwrap_or_default();
+
+        // Firmware version (string)
+        let firmware = manager
+            .execute_with_reconnect(|client| {
+                let id = self.config.modbus.station_slave_id;
+                let addr = self.config.registers.firmware_version;
+                let cnt = self.config.registers.firmware_version_count;
+                Box::pin(async move { client.read_holding_registers(id, addr, cnt).await })
+            })
+            .await
+            .ok()
+            .map(|regs| decode_string(&regs, None).unwrap_or_default())
+            .unwrap_or_default();
+
+        // Serial number (string)
+        let serial = manager
+            .execute_with_reconnect(|client| {
+                let id = self.config.modbus.station_slave_id;
+                let addr = self.config.registers.station_serial;
+                let cnt = self.config.registers.station_serial_count;
+                Box::pin(async move { client.read_holding_registers(id, addr, cnt).await })
+            })
+            .await
+            .ok()
+            .map(|regs| decode_string(&regs, None).unwrap_or_default())
+            .unwrap_or_default();
+
+        // Publish to D-Bus and log
+        if let Some(dbus) = &mut self.dbus {
+            let mut updates: Vec<(String, serde_json::Value)> = Vec::with_capacity(3);
+            // Align ProductName with Python implementation: include manufacturer when available
+            if !manufacturer.is_empty() {
+                let pname = format!("{} EV Charger", manufacturer);
+                updates.push(("/ProductName".to_string(), serde_json::json!(pname)));
+            }
+            if !firmware.is_empty() {
+                updates.push((
+                    "/FirmwareVersion".to_string(),
+                    serde_json::json!(firmware.clone()),
+                ));
+            }
+            if !serial.is_empty() {
+                updates.push(("/Serial".to_string(), serde_json::json!(serial.clone())));
+            }
+            if !updates.is_empty() {
+                let product_name = if !manufacturer.is_empty() {
+                    format!("{} EV Charger", manufacturer)
+                } else {
+                    "Alfen EV Charger".to_string()
+                };
+                self.logger.info(&format!(
+                    "Publishing charger identity: product_name='{}', firmware='{}', serial='{}'",
+                    product_name, firmware, serial
+                ));
+                let _ = dbus.update_paths(updates).await;
+            } else {
+                self.logger
+                    .warn("Charger identity not available via Modbus; leaving defaults");
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl AlfenDriver {
+    /// Start D-Bus once we have identity information; avoid publishing placeholder defaults first
+    async fn try_start_dbus_with_identity(&mut self) -> Result<()> {
+        // Start D-Bus service (we will publish identity immediately after)
+        let mut dbus =
+            DbusService::new(self.config.device_instance, self.commands_tx.clone()).await?;
+        dbus.start().await?;
+        self.dbus = Some(dbus);
+
+        // Publish management and core info
+        if let Some(d) = &mut self.dbus {
+            // Device instance and connection are safe to publish
+            let conn_str = format!(
+                "Modbus TCP at {}:{}",
+                self.config.modbus.ip, self.config.modbus.port
+            );
+            let _ = d
+                .update_paths([
+                    (
+                        "/Mgmt/ProcessName".to_string(),
+                        serde_json::json!("phaeton"),
+                    ),
+                    (
+                        "/Mgmt/ProcessVersion".to_string(),
+                        serde_json::json!(env!("CARGO_PKG_VERSION")),
+                    ),
+                    ("/Mgmt/Connection".to_string(), serde_json::json!(conn_str)),
+                    (
+                        "/DeviceInstance".to_string(),
+                        serde_json::json!(self.config.device_instance),
+                    ),
+                    ("/ProductId".to_string(), serde_json::json!(0xC024u32)),
+                    ("/Connected".to_string(), serde_json::json!(1u8)),
+                    ("/Model".to_string(), serde_json::json!("AC22NS")),
+                ])
+                .await;
+
+            // Create writable control paths using persisted state
+            let _ = d
+                .ensure_item("/Mode", serde_json::json!(self.current_mode as u8), true)
+                .await;
+            let _ = d
+                .ensure_item("/StartStop", serde_json::json!(self.start_stop as u8), true)
+                .await;
+            let _ = d
+                .ensure_item(
+                    "/SetCurrent",
+                    serde_json::json!(self.intended_set_current),
+                    true,
+                )
+                .await;
+            let _ = d
+                .ensure_item("/Position", serde_json::json!(0u8), true)
+                .await;
+            let _ = d
+                .ensure_item("/AutoStart", serde_json::json!(0u8), true)
+                .await;
+            let _ = d
+                .ensure_item("/EnableDisplay", serde_json::json!(0u8), true)
+                .await;
+        }
+
+        // After DBus is up, read and publish identity (ProductName, FirmwareVersion, Serial)
+        let _ = self.refresh_charger_identity().await;
+
+        Ok(())
     }
 }
 
