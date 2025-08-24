@@ -276,6 +276,14 @@ impl RootBus {
         out
     }
 
+    #[zbus(signal)]
+    async fn items_changed(
+        ctxt: &SignalContext<'_>,
+        changes: std::collections::HashMap<&str, std::collections::HashMap<&str, OwnedValue>>,
+    ) -> zbus::Result<()>;
+}
+
+impl RootBus {
     fn collect_subtree_map(
         &self,
         prefix: &str,
@@ -303,12 +311,6 @@ impl RootBus {
         }
         result
     }
-
-    #[zbus(signal)]
-    async fn items_changed(
-        ctxt: &SignalContext<'_>,
-        changes: std::collections::HashMap<&str, std::collections::HashMap<&str, OwnedValue>>,
-    ) -> zbus::Result<()>;
 }
 
 /// D-Bus service manager
