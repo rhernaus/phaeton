@@ -6,6 +6,10 @@ modbus:
 
 device_instance: 0
 
+# Require D-Bus on startup (fail if not available). Set to false only for
+# development when tunneling the system bus via SSH.
+require_dbus: true
+
 registers:
   voltages: 306
   currents: 320

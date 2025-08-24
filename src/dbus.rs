@@ -269,10 +269,25 @@ impl DbusService {
     pub async fn start(&mut self) -> Result<()> {
         // Connect to system bus (falls back to session bus if system unavailable)
         let connection = match Connection::system().await {
-            Ok(c) => c,
-            Err(_) => Connection::session()
-                .await
-                .map_err(|e| PhaetonError::dbus(format!("DBus connect failed: {}", e)))?,
+            Ok(c) => {
+                self.logger.info("Connected to D-Bus: system bus");
+                c
+            }
+            Err(e_sys) => match Connection::session().await {
+                Ok(c) => {
+                    self.logger.warn(&format!(
+                        "System bus unavailable ({}); using session bus",
+                        e_sys
+                    ));
+                    c
+                }
+                Err(e_sess) => {
+                    return Err(PhaetonError::dbus(format!(
+                        "DBus connect failed: system={} session={}",
+                        e_sys, e_sess
+                    )));
+                }
+            },
         };
 
         // Request our well-known name

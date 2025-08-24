@@ -9,6 +9,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
+fn default_true() -> bool {
+    true
+}
+
 /// Main configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Config {
@@ -17,6 +21,10 @@ pub struct Config {
 
     /// Device instance for D-Bus service naming
     pub device_instance: u32,
+
+    /// Require D-Bus to be available; fail fast on startup if unavailable
+    #[serde(default = "default_true")]
+    pub require_dbus: bool,
 
     /// Modbus register address mappings
     pub registers: RegistersConfig,
@@ -385,6 +393,7 @@ impl Default for Config {
         Self {
             modbus: ModbusConfig::default(),
             device_instance: 0,
+            require_dbus: true,
             registers: RegistersConfig::default(),
             defaults: DefaultsConfig::default(),
             logging: LoggingConfig::default(),
@@ -489,6 +498,7 @@ mod tests {
         assert_eq!(config.modbus.port, 502);
         assert_eq!(config.device_instance, 0);
         assert_eq!(config.poll_interval_ms, 1000);
+        assert!(config.require_dbus);
     }
 
     #[test]

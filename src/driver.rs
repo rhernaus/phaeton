@@ -186,8 +186,24 @@ impl AlfenDriver {
         // Initialize control state from config defaults
         self.intended_set_current = self.config.defaults.intended_set_current;
         self.station_max_current = self.config.defaults.station_max_current;
-        // Attempt to start D-Bus service only after we have identity values, to avoid publishing defaults
-        let _ = self.try_start_dbus_with_identity().await;
+        // Attempt to start D-Bus service only after we have identity values
+        match self.try_start_dbus_with_identity().await {
+            Ok(_) => {}
+            Err(e) => {
+                if self.config.require_dbus {
+                    self.logger.error(&format!(
+                        "Failed to initialize D-Bus and require_dbus=true: {}",
+                        e
+                    ));
+                    return Err(e);
+                } else {
+                    self.logger.warn(&format!(
+                        "D-Bus initialization failed but require_dbus=false, continuing without D-Bus: {}",
+                        e
+                    ));
+                }
+            }
+        }
 
         // Main polling loop
         let mut poll_interval = interval(Duration::from_millis(self.config.poll_interval_ms));

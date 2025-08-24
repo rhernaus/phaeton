@@ -119,6 +119,30 @@ cargo fmt --check
 cargo audit
 ```
 
+#### Developing on macOS/Linux with remote D-Bus (Cerbo GX)
+
+By design, D-Bus is local IPC. Victron Venus OS does not expose the system bus over TCP. For development, you can forward the Cerbo GX system bus over SSH and run Phaeton on your workstation.
+
+1) Forward the system bus socket to your machine:
+
+```bash
+ssh -N \
+  -L /tmp/venus-system-bus:/var/run/dbus/system_bus_socket \
+  root@<cerbo-ip>
+```
+
+2) Point Phaeton to the forwarded system bus and allow startup:
+
+```bash
+export DBUS_SYSTEM_BUS_ADDRESS=unix:path=/tmp/venus-system-bus
+export ZBUS_SYSTEM_BUS_ADDRESS=unix:path=/tmp/venus-system-bus
+
+# Option A (recommended): keep require_dbus: true in config
+# Option B (temporary): set require_dbus: false in phaeton_config.yaml for local testing
+```
+
+Security note: only use SSH forwarding on trusted networks. Do not expose D-Bus directly via TCP.
+
 ### Cross-Compilation
 
 Phaeton supports cross-compilation for multiple architectures to run on different systems:
