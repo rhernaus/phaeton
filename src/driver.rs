@@ -376,12 +376,14 @@ impl AlfenDriver {
                 };
 
                 let (l1_p, l2_p, l3_p, p_total) = match power_regs {
-                    Some(v) if v.len() >= 8 => (
-                        decode_32bit_float(&v[0..2]).unwrap_or(0.0) as f64,
-                        decode_32bit_float(&v[2..4]).unwrap_or(0.0) as f64,
-                        decode_32bit_float(&v[4..6]).unwrap_or(0.0) as f64,
-                        decode_32bit_float(&v[6..8]).unwrap_or(0.0) as f64,
-                    ),
+                    Some(v) if v.len() >= 8 => {
+                        let p1 = decode_32bit_float(&v[0..2]).unwrap_or(0.0) as f64;
+                        let p2 = decode_32bit_float(&v[2..4]).unwrap_or(0.0) as f64;
+                        let p3 = decode_32bit_float(&v[4..6]).unwrap_or(0.0) as f64;
+                        let pt = decode_32bit_float(&v[6..8]).unwrap_or(0.0) as f64;
+                        let sanitize = |x: f64| if x.is_finite() { x } else { 0.0 };
+                        (sanitize(p1), sanitize(p2), sanitize(p3), sanitize(pt))
+                    }
                     _ => (0.0, 0.0, 0.0, 0.0),
                 };
 
