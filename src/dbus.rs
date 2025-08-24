@@ -10,6 +10,7 @@ use crate::logging::get_logger;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
+use tokio::time::{Duration, timeout};
 use zbus::object_server::InterfaceRef;
 use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 use zbus::{Connection, Proxy, Result as ZbusResult, names::WellKnownName};
@@ -662,13 +663,19 @@ impl DbusService {
             None => return Err(PhaetonError::dbus("No D-Bus connection available")),
         };
 
-        let proxy = Proxy::new(conn, service_name, path, "com.victronenergy.BusItem")
-            .await
-            .map_err(|e| PhaetonError::dbus(format!("Proxy creation failed: {}", e)))?;
+        // Bound proxy creation time to avoid hanging when the service is absent
+        let proxy = timeout(
+            Duration::from_millis(600),
+            Proxy::new(conn, service_name, path, "com.victronenergy.BusItem"),
+        )
+        .await
+        .map_err(|_| PhaetonError::dbus("DBus proxy creation timed out"))?
+        .map_err(|e| PhaetonError::dbus(format!("Proxy creation failed: {}", e)))?;
 
-        let val: OwnedValue = proxy
-            .call("GetValue", &())
+        // Bound GetValue invocation to avoid request stalls
+        let val: OwnedValue = timeout(Duration::from_millis(600), proxy.call("GetValue", &()))
             .await
+            .map_err(|_| PhaetonError::dbus("DBus GetValue timed out"))?
             .map_err(|e| PhaetonError::dbus(format!("GetValue call failed: {}", e)))?;
 
         Ok(BusItem::owned_value_to_serde(&val))
