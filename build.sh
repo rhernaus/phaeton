@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Phaeton Cross-Compilation Script
-# Builds binaries for Cerbo GX (ARM v7) and Linux ARM64
+# Builds binaries for Cerbo GX (ARM v7), Linux ARM64, and Linux AMD64 in parallel
 
 set -e
 
@@ -50,6 +50,7 @@ fi
 print_status "Installing Rust cross-compilation targets..."
 rustup target add armv7-unknown-linux-gnueabihf
 rustup target add aarch64-unknown-linux-gnu
+rustup target add x86_64-unknown-linux-gnu
 
 # Install cross-compilation tools on macOS
 if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -86,15 +87,31 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
             SKIP_ARMV7=true
         fi
     fi
+
+    if ! command_exists x86_64-unknown-linux-gnu-gcc; then
+        print_warning "AMD64 (Linux) cross-compilation tools not found."
+        print_status "Installing via Homebrew..."
+        if command_exists brew; then
+            brew tap messense/macos-cross-toolchains
+            brew install x86_64-unknown-linux-gnu
+        else
+            print_error "Homebrew not found. Please install AMD64 cross-compilation tools manually:"
+            echo "  brew tap messense/macos-cross-toolchains"
+            echo "  brew install x86_64-unknown-linux-gnu"
+            echo ""
+            print_warning "Skipping AMD64 cross-compilation for now..."
+            SKIP_AMD64=true
+        fi
+    fi
 else
     print_status "Installing cross-compilation tools for Linux..."
-    if sudo apt-get update && sudo apt-get install -y gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu; then
+    if sudo apt-get update && sudo apt-get install -y gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu gcc-x86-64-linux-gnu; then
         print_success "Cross-compilation tools installed successfully!"
     else
         print_error "Failed to install cross-compilation tools."
         echo "Please install manually:"
         echo "  sudo apt-get update"
-        echo "  sudo apt-get install -y gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu"
+        echo "  sudo apt-get install -y gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu gcc-x86-64-linux-gnu"
         exit 1
     fi
 fi
@@ -143,34 +160,38 @@ build_target() {
     fi
 }
 
-# Build for all targets
-print_status "Starting builds..."
+print_status "Starting parallel builds..."
+
+PIDS=()
 
 # Build for Cerbo GX (ARM v7)
 if [[ "$SKIP_ARMV7" != "true" ]]; then
-    build_target "armv7-unknown-linux-gnueabihf" "Cerbo GX"
+    build_target "armv7-unknown-linux-gnueabihf" "Cerbo GX" &
+    PIDS+=("$!")
 else
     print_warning "Skipping ARM v7 build (cross-compilation tools not available)"
 fi
 
 # Build for Linux ARM64
 if [[ "$SKIP_ARM64" != "true" ]]; then
-    build_target "aarch64-unknown-linux-gnu" "Linux ARM64"
+    build_target "aarch64-unknown-linux-gnu" "Linux ARM64" &
+    PIDS+=("$!")
 else
     print_warning "Skipping ARM64 build (cross-compilation tools not available)"
 fi
 
-# Build for macOS (native) - always try this
-print_status "Building for macOS ARM64 (native)..."
-if cargo build --release --verbose; then
-    print_success "Successfully built for macOS ARM64"
-
-    cd target/release
-    tar -czf "../../dist/phaeton-v${VERSION}-macos-arm64.tar.gz" phaeton
-    cd ../..
-    print_success "Created archive: dist/phaeton-v${VERSION}-macos-arm64.tar.gz"
+# Build for Linux AMD64
+if [[ "$SKIP_AMD64" != "true" ]]; then
+    build_target "x86_64-unknown-linux-gnu" "Linux AMD64" &
+    PIDS+=("$!")
 else
-    print_error "Failed to build for macOS ARM64"
+    print_warning "Skipping AMD64 build (cross-compilation tools not available)"
+fi
+
+# Wait for all background builds to complete
+if [[ ${#PIDS[@]} -gt 0 ]]; then
+    print_status "Waiting for ${#PIDS[@]} parallel build(s) to finish..."
+    wait
 fi
 
 print_success "Build process completed!"
@@ -193,22 +214,22 @@ if [[ -d "dist" ]]; then
         echo "  ❌ Linux ARM64: Not built (cross-compilation tools not available)"
     fi
 
-    if ls dist/phaeton-v${VERSION}-macos-arm64.tar.gz >/dev/null 2>&1; then
-        echo "  ✅ macOS ARM64: dist/phaeton-v${VERSION}-macos-arm64.tar.gz"
+    if ls dist/phaeton-v${VERSION}-x86_64-unknown-linux-gnu.tar.gz >/dev/null 2>&1; then
+        echo "  ✅ Linux AMD64: dist/phaeton-v${VERSION}-x86_64-unknown-linux-gnu.tar.gz"
     else
-        echo "  ❌ macOS ARM64: Build failed"
+        echo "  ❌ Linux AMD64: Not built (cross-compilation tools not available)"
     fi
 else
     print_error "No dist directory found. Build may have failed."
 fi
 
-# Quick build for local use (macOS ARM64 only)
-print_status "Building for local macOS use..."
-if cargo build --release --verbose; then
-    print_success "Local macOS binary ready at: target/release/phaeton"
-    echo "  You can run it with: ./target/release/phaeton"
+# Quick build for local host (debugging)
+print_status "Building for local host (debug) ..."
+if cargo build --verbose; then
+    print_success "Local host binary ready at: target/debug/phaeton"
+    echo "  You can run it with: ./target/debug/phaeton"
 else
-    print_error "Failed to build local binary"
+    print_error "Failed to build local host binary"
 fi
 
 # Provide installation instructions
@@ -226,7 +247,8 @@ if [[ -d "dist" ]]; then
     echo "  2. Move binary: sudo mv phaeton /usr/local/bin/"
     echo "  3. Make executable: sudo chmod +x /usr/local/bin/phaeton"
     echo ""
-    echo "For macOS (local):"
-    echo "  1. Extract: tar -xzf phaeton-v${VERSION}-macos-arm64.tar.gz"
-    echo "  2. The binary can be run directly: ./phaeton"
+    echo "For Linux AMD64 systems:"
+    echo "  1. Extract: tar -xzf phaeton-v${VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+    echo "  2. Move binary: sudo mv phaeton /usr/local/bin/"
+    echo "  3. Make executable: sudo chmod +x /usr/local/bin/phaeton"
 fi
