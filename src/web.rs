@@ -314,8 +314,6 @@ pub fn build_router(state: AppState) -> Router {
 
     Router::new()
         .route("/", get(|| async { Redirect::to("/ui/index.html") }))
-        .route("/ui", get(|| async { Redirect::to("/ui/index.html") }))
-        .route("/app", get(|| async { Redirect::to("/ui/index.html") }))
         .route("/api/health", get(health))
         .route("/api/status", get(status))
         .route("/api/mode", post(set_mode))
@@ -334,12 +332,12 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/events", get(events))
         .nest_service(
             "/ui",
-            get_service(ServeDir::new("./webui"))
+            get_service(ServeDir::new("./webui").append_index_html_on_directories(true))
                 .handle_error(|_| async { StatusCode::INTERNAL_SERVER_ERROR }),
         )
         .nest_service(
             "/app",
-            get_service(ServeDir::new("./webui"))
+            get_service(ServeDir::new("./webui").append_index_html_on_directories(true))
                 .handle_error(|_| async { StatusCode::INTERNAL_SERVER_ERROR }),
         )
         .merge(SwaggerUi::new("/docs").url("/openapi.json", openapi))

@@ -23,7 +23,7 @@ phaeton/
 │   ├── modbus.rs          # Modbus TCP client
 │   ├── driver.rs          # Core driver logic
 │   ├── dbus.rs            # D-Bus integration
-│   ├── web_axum.rs        # HTTP server and API (Axum + OpenAPI)
+│   ├── web.rs             # HTTP server and API (Axum + OpenAPI)
 │   ├── persistence.rs     # State persistence
 │   ├── session.rs         # Charging session management
 │   ├── controls.rs        # Charging control algorithms
