@@ -429,6 +429,12 @@ impl DbusService {
             .at(&self.charger_path, charger)
             .await
             .map_err(|e| PhaetonError::dbus(format!("Register object failed: {}", e)))?;
+        // Add standard Properties interface so clients can use DBus Properties.Get
+        connection
+            .object_server()
+            .at(&self.charger_path, zbus::fdo::Properties)
+            .await
+            .map_err(|e| PhaetonError::dbus(format!("Register Properties failed: {}", e)))?;
         // Also register the root '/' as a BusItem tree provider similar to VeDbusRootExport
         let root = RootBus {
             shared: Arc::clone(&self.shared),
@@ -466,18 +472,34 @@ impl DbusService {
                         PhaetonError::dbus(format!("Invalid object path '{}': {}", subpath, e))
                     })?;
 
-                    let item = BusItem::new(subpath.clone(), Arc::clone(&self.shared));
-
-                    if let Some(conn) = &self.connection {
-                        conn.object_server()
-                            .at(&obj_path, item)
-                            .await
-                            .map_err(|e| {
-                                PhaetonError::dbus(format!(
-                                    "Register BusItem failed for {}: {}",
-                                    subpath, e
-                                ))
-                            })?;
+                    // For leaf paths, register a value BusItem; for intermediate nodes, register a TreeNode
+                    let item_is_leaf = i == segments.len();
+                    if item_is_leaf {
+                        let item = BusItem::new(subpath.clone(), Arc::clone(&self.shared));
+                        if let Some(conn) = &self.connection {
+                            conn.object_server()
+                                .at(&obj_path, item)
+                                .await
+                                .map_err(|e| {
+                                    PhaetonError::dbus(format!(
+                                        "Register BusItem failed for {}: {}",
+                                        subpath, e
+                                    ))
+                                })?;
+                        }
+                    } else {
+                        let node = TreeNode::new(subpath.clone(), Arc::clone(&self.shared));
+                        if let Some(conn) = &self.connection {
+                            conn.object_server()
+                                .at(&obj_path, node)
+                                .await
+                                .map_err(|e| {
+                                    PhaetonError::dbus(format!(
+                                        "Register TreeNode failed for {}: {}",
+                                        subpath, e
+                                    ))
+                                })?;
+                        }
                     }
 
                     self.registered_paths.insert(subpath);
@@ -894,7 +916,7 @@ impl BusItem {
         Self::serde_to_owned_value(&val)
     }
 
-    /// Attempt to set the value; returns true on success
+    /// Attempt to set the value; returns 0 on success (VeDbus-compatible)
     #[zbus(name = "SetValue")]
     async fn set_value(&self, value: OwnedValue) -> i32 {
         let mut shared = self.shared.lock().unwrap();
@@ -956,6 +978,57 @@ impl BusItem {
         ctxt: &SignalContext<'_>,
         changes: std::collections::HashMap<&str, OwnedValue>,
     ) -> zbus::Result<()>;
+}
+
+/// VeDbus-style Tree node implementing com.victronenergy.BusItem for intermediate paths
+struct TreeNode {
+    path: String,
+    shared: Arc<Mutex<DbusSharedState>>,
+}
+
+impl TreeNode {
+    fn new(path: String, shared: Arc<Mutex<DbusSharedState>>) -> Self {
+        Self { path, shared }
+    }
+
+    fn collect_subtree_map(&self, as_text: bool) -> std::collections::HashMap<String, OwnedValue> {
+        use std::collections::HashMap;
+        let shared = self.shared.lock().unwrap();
+        let mut px = self.path.clone();
+        if !px.ends_with('/') {
+            px.push('/');
+        }
+        let mut result: HashMap<String, OwnedValue> = HashMap::new();
+        for (path, val) in shared.paths.iter() {
+            if path.starts_with(&px) {
+                let suffix = &path[px.len()..];
+                let ov = if as_text {
+                    let text = format_text_value(val);
+                    OwnedValue::try_from(Value::from(text.as_str()))
+                        .unwrap_or_else(|_| OwnedValue::from(0i64))
+                } else {
+                    BusItem::serde_to_owned_value(val)
+                };
+                result.insert(suffix.to_string(), ov);
+            }
+        }
+        result
+    }
+}
+
+#[zbus::interface(name = "com.victronenergy.BusItem")]
+impl TreeNode {
+    /// Return a dictionary of child items under this node
+    #[zbus(name = "GetValue")]
+    async fn get_value(&self) -> OwnedValue {
+        OwnedValue::from(self.collect_subtree_map(false))
+    }
+
+    /// Return a dictionary of child items' text under this node
+    #[zbus(name = "GetText")]
+    async fn get_text(&self) -> OwnedValue {
+        OwnedValue::from(self.collect_subtree_map(true))
+    }
 }
 
 /// Helper to format a JSON value into the textual representation used by GetText
