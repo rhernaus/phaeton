@@ -9,7 +9,7 @@ This project is an EV charger driver, providing a performant, memory-safe, and m
 - **Edition**: Migrated to Rust 2024 ✅
 - **Code Quality**: Clippy clean; unit tests present for core modules ✅
 - **Build/cross**: Cross-compilation scaffolding present for ARMv7 and AArch64 ✅
-- **CI/CD**: GitHub Actions planned; local tests and benches available
+- **CI/CD**: GitHub Actions implemented ✅
 - **Dependencies**: `tokio-modbus` at 0.16.1; nested Result handling adopted ✅
 
 ## Project Structure
