@@ -1,6 +1,6 @@
 [package]
 name = "phaeton"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2024"
 description = "Phaeton - EV Charger Driver for Victron Venus OS"
 authors = ["Your Name <your.email@example.com>"]

@@ -236,6 +236,75 @@ impl EvCharger {
     }
 }
 
+struct RootBus {
+    shared: Arc<Mutex<DbusSharedState>>,
+}
+
+#[zbus::interface(name = "com.victronenergy.BusItem")]
+impl RootBus {
+    /// Root-level GetValue should return a dictionary of all items relative to '/'
+    #[zbus(name = "GetValue")]
+    async fn get_value(&self) -> OwnedValue {
+        let map = self.collect_subtree_map("/", false);
+        OwnedValue::from(map)
+    }
+
+    /// Root-level GetText should return textual representation for all items
+    #[zbus(name = "GetText")]
+    async fn get_text(&self) -> OwnedValue {
+        let map = self.collect_subtree_map("/", true);
+        OwnedValue::from(map)
+    }
+
+    /// Return all items as { path => { "Value": v, "Text": s } }
+    #[zbus(name = "GetItems")]
+    async fn get_items(
+        &self,
+    ) -> std::collections::HashMap<String, std::collections::HashMap<String, OwnedValue>> {
+        use std::collections::HashMap;
+        let shared = self.shared.lock().unwrap();
+        let mut out: HashMap<String, HashMap<String, OwnedValue>> = HashMap::new();
+        for (path, val) in shared.paths.iter() {
+            let mut entry: HashMap<String, OwnedValue> = HashMap::new();
+            entry.insert("Value".to_string(), BusItem::serde_to_owned_value(val));
+            let text = format_text_value(val);
+            let text_ov = OwnedValue::try_from(Value::from(text.as_str()))
+                .unwrap_or_else(|_| OwnedValue::from(0i64));
+            entry.insert("Text".to_string(), text_ov);
+            out.insert(path.clone(), entry);
+        }
+        out
+    }
+
+    fn collect_subtree_map(
+        &self,
+        prefix: &str,
+        as_text: bool,
+    ) -> std::collections::HashMap<String, OwnedValue> {
+        use std::collections::HashMap;
+        let shared = self.shared.lock().unwrap();
+        let mut px = prefix.to_string();
+        if !px.ends_with('/') {
+            px.push('/');
+        }
+        let mut result: HashMap<String, OwnedValue> = HashMap::new();
+        for (path, val) in shared.paths.iter() {
+            if path.starts_with(&px) {
+                let suffix = &path[px.len()..];
+                let ov = if as_text {
+                    let text = format_text_value(val);
+                    OwnedValue::try_from(Value::from(text.as_str()))
+                        .unwrap_or_else(|_| OwnedValue::from(0i64))
+                } else {
+                    BusItem::serde_to_owned_value(val)
+                };
+                result.insert(suffix.to_string(), ov);
+            }
+        }
+        result
+    }
+}
+
 /// D-Bus service manager
 pub struct DbusService {
     logger: crate::logging::StructuredLogger,
@@ -354,6 +423,15 @@ impl DbusService {
             .at(&self.charger_path, charger)
             .await
             .map_err(|e| PhaetonError::dbus(format!("Register object failed: {}", e)))?;
+        // Also register the root '/' as a BusItem tree provider similar to VeDbusRootExport
+        let root = RootBus {
+            shared: Arc::clone(&self.shared),
+        };
+        connection
+            .object_server()
+            .at(&self.charger_path, root)
+            .await
+            .map_err(|e| PhaetonError::dbus(format!("Register root BusItem failed: {}", e)))?;
         self.connection = Some(connection);
         Ok(())
     }
@@ -372,24 +450,33 @@ impl DbusService {
         initial_value: serde_json::Value,
         writable: bool,
     ) -> Result<()> {
-        // Register object path if not registered yet
-        if !self.registered_paths.contains(path) {
-            let obj_path = OwnedObjectPath::try_from(path).map_err(|e| {
-                PhaetonError::dbus(format!("Invalid object path '{}': {}", path, e))
-            })?;
-
-            let item = BusItem::new(path.to_string(), Arc::clone(&self.shared));
-
-            if let Some(conn) = &self.connection {
-                conn.object_server()
-                    .at(&obj_path, item)
-                    .await
-                    .map_err(|e| {
-                        PhaetonError::dbus(format!("Register BusItem failed for {}: {}", path, e))
+        // Register intermediate tree nodes and the leaf path if not registered yet
+        let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+        if !segments.is_empty() {
+            for i in 1..=segments.len() {
+                let subpath = format!("/{}", segments[..i].join("/"));
+                if !self.registered_paths.contains(&subpath) {
+                    let obj_path = OwnedObjectPath::try_from(subpath.as_str()).map_err(|e| {
+                        PhaetonError::dbus(format!("Invalid object path '{}': {}", subpath, e))
                     })?;
-            }
 
-            self.registered_paths.insert(path.to_string());
+                    let item = BusItem::new(subpath.clone(), Arc::clone(&self.shared));
+
+                    if let Some(conn) = &self.connection {
+                        conn.object_server()
+                            .at(&obj_path, item)
+                            .await
+                            .map_err(|e| {
+                                PhaetonError::dbus(format!(
+                                    "Register BusItem failed for {}: {}",
+                                    subpath, e
+                                ))
+                            })?;
+                    }
+
+                    self.registered_paths.insert(subpath);
+                }
+            }
         }
 
         // Initialize value and writability
@@ -769,10 +856,10 @@ impl BusItem {
 
     /// Attempt to set the value; returns true on success
     #[zbus(name = "SetValue")]
-    async fn set_value(&self, value: OwnedValue) -> bool {
+    async fn set_value(&self, value: OwnedValue) -> i32 {
         let mut shared = self.shared.lock().unwrap();
         if !shared.writable.contains(&self.path) {
-            return false;
+            return 1; // NOT OK
         }
 
         let sv = Self::owned_value_to_serde(&value);
@@ -796,7 +883,7 @@ impl BusItem {
             _ => {}
         }
 
-        true
+        0 // OK
     }
 
     /// Return a textual representation of the current value
@@ -822,6 +909,22 @@ impl BusItem {
             serde_json::Value::Bool(b) => b.to_string(),
             _ => val.to_string(),
         }
+    }
+}
+
+/// Helper to format a JSON value into the textual representation used by GetText
+fn format_text_value(val: &serde_json::Value) -> String {
+    match val {
+        serde_json::Value::Number(n) => {
+            if let Some(f) = n.as_f64() {
+                format!("{:.2}", f)
+            } else {
+                n.to_string()
+            }
+        }
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        _ => val.to_string(),
     }
 }
 
