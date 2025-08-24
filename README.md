@@ -1,22 +1,18 @@
-# Phaeton - Alfen EV Charger Driver (Rust)
+# Phaeton - EV Charger Driver
 
-A high-performance Rust implementation of the Alfen EV charger driver for Victron Venus OS, providing seamless integration with Victron's D-Bus system and advanced features like dynamic pricing, vehicle integration, and self-updates.
+A high-performance EV charger driver for Victron Venus OS, providing seamless integration with Victron's D-Bus system and advanced features like dynamic pricing, vehicle integration, and self-updates.
 
 ## Features
 
 - **High Performance**: Async-first design with Tokio runtime
 - **Memory Safe**: Rust's ownership system prevents common bugs
-- **Modbus TCP**: Direct communication with Alfen EV chargers
+- **Modbus TCP**: Direct communication with EV chargers
 - **D-Bus Integration**: Full Venus OS compatibility
 - **Web Interface**: REST API and static file serving (Axum)
 - **Dynamic Pricing**: Tibber API integration for smart charging
 - **Vehicle Integration**: Tesla and Kia API support
 - **Self-Updates**: Git-based automatic updates
 - **Configuration**: YAML-based configuration with validation
-
-## Status
-
-🚧 **Work in Progress**: This is a rewrite of the Python [victron-alfen-charger](https://github.com/your-org/victron-alfen-charger) project in Rust. Currently in Phase 2 (Core communication & control) – polling, MANUAL/AUTO/SCHEDULED control logic, session tracking + persistence, and D‑Bus via `zbus` (service registered; cached paths for now) are implemented. A web API powered by Axum is available (status + control + config get/update, logs, updates, SSE), and OpenAPI docs are exposed. CI builds and cross-compiles are configured. Modbus stack upgraded to `tokio-modbus` 0.16.1.
 
 ## Quick Start
 
@@ -64,7 +60,7 @@ Nightly builds are published to the rolling `nightly` prerelease for early testi
 
 - Rust (stable) with 2024 edition
 - Venus OS or Linux system with D-Bus support
-- Alfen EV charger accessible via network
+- EV charger accessible via network
 
 ### Installation
 
@@ -244,7 +240,7 @@ The application uses YAML configuration with the following main sections:
 
 ```yaml
 modbus:
-  ip: "10.128.0.64"
+  ip: "192.168.1.100"
   port: 502
   socket_slave_id: 1
   station_slave_id: 200
@@ -308,7 +304,3 @@ CMD ["phaeton"]
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Related Projects
-
-- [victron-alfen-charger](https://github.com/your-org/victron-alfen-charger) - Original Python implementation

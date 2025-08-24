@@ -15,7 +15,7 @@ async fn main() -> Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("Failed to create driver: {}", e))?;
 
-    info!("Phaeton Alfen EV Charger Driver starting up");
+    info!("Phaeton EV Charger Driver starting up");
 
     // Share driver with web server
     let driver_arc = Arc::new(Mutex::new(driver));

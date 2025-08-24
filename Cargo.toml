@@ -2,7 +2,7 @@
 name = "phaeton"
 version = "0.1.0"
 edition = "2024"
-description = "Alfen EV Charger Driver for Victron Venus OS - Rust rewrite"
+description = "Phaeton - EV Charger Driver for Victron Venus OS"
 authors = ["Your Name <your.email@example.com>"]
 license = "MIT OR Apache-2.0"
 keywords = ["ev", "charger", "modbus", "victron", "venus"]

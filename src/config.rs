@@ -62,7 +62,7 @@ pub struct Config {
 /// Modbus TCP connection parameters
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ModbusConfig {
-    /// IP address of the Alfen charger
+    /// IP address of the EV charger
     pub ip: String,
 
     /// TCP port (typically 502)
@@ -274,7 +274,7 @@ pub struct PricingConfig {
 impl Default for ModbusConfig {
     fn default() -> Self {
         Self {
-            ip: "10.128.0.64".to_string(),
+            ip: "192.168.1.100".to_string(),
             port: 502,
             socket_slave_id: 1,
             station_slave_id: 200,

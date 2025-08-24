@@ -1,6 +1,7 @@
 //! Axum-based HTTP server with OpenAPI (utoipa) and Swagger UI
 
 use crate::driver::AlfenDriver;
+use axum::response::Redirect;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::{
     Json, Router,
@@ -312,6 +313,9 @@ pub fn build_router(state: AppState) -> Router {
     let openapi = ApiDoc::openapi();
 
     Router::new()
+        .route("/", get(|| async { Redirect::to("/ui/index.html") }))
+        .route("/ui", get(|| async { Redirect::to("/ui/index.html") }))
+        .route("/app", get(|| async { Redirect::to("/ui/index.html") }))
         .route("/api/health", get(health))
         .route("/api/status", get(status))
         .route("/api/mode", post(set_mode))
