@@ -70,8 +70,6 @@ jobs:
       - name: Run cargo audit
         run: cargo audit --deny warnings
 
-
-
   webui-lint:
     name: Web UI Linters
     runs-on: ubuntu-24.04
@@ -89,29 +87,6 @@ jobs:
           VALIDATE_JAVASCRIPT_ES: true
           VALIDATE_CSS: true
           VALIDATE_HTML: true
-
-
-  linux-build:
-    name: Linux x86_64 Build
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Setup Rust (stable)
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
-      - name: Build (release)
-        run: cargo build --release --locked --verbose
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: phaeton-linux-x86_64
-          path: target/release/phaeton
 
   cross-compilation:
     name: Cross-compilation (${{ matrix.target }}, ${{ matrix.friendly }}, ${{ matrix.gcc_pkg }}, ${{ matrix.apt_arch }})
