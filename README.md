@@ -24,15 +24,15 @@ A high-performance Rust implementation of the Alfen EV charger driver for Victro
 
 Grab the latest binaries from [Releases](https://github.com/your-org/phaeton/releases):
 
-- **Cerbo GX (ARMv7)**: `phaeton-armv7-unknown-linux-gnueabihf.tar.gz`
-- **Linux ARM64**: `phaeton-aarch64-unknown-linux-gnu.tar.gz`
-- **macOS ARM64**: `phaeton-macos-arm64.tar.gz`
+- **Cerbo GX (ARMv7)**: `phaeton-v<version>-armv7-unknown-linux-gnueabihf.tar.gz`
+- **Linux ARM64**: `phaeton-v<version>-aarch64-unknown-linux-gnu.tar.gz`
+- **macOS ARM64**: `phaeton-v<version>-macos-arm64.tar.gz`
 
 Verify checksums (Linux):
 
 ```bash
 curl -L -O https://github.com/your-org/phaeton/releases/download/<tag>/SHA256SUMS
-curl -L -O https://github.com/your-org/phaeton/releases/download/<tag>/phaeton-<artifact>.tar.gz
+curl -L -O https://github.com/your-org/phaeton/releases/download/<tag>/phaeton-v<version>-<artifact>.tar.gz
 sha256sum -c SHA256SUMS
 ```
 
@@ -40,15 +40,15 @@ Verify on macOS:
 
 ```bash
 curl -L -O https://github.com/your-org/phaeton/releases/download/<tag>/SHA256SUMS
-curl -L -O https://github.com/your-org/phaeton/releases/download/<tag>/phaeton-macos-arm64.tar.gz
-shasum -a 256 phaeton-macos-arm64.tar.gz
-grep phaeton-macos-arm64.tar.gz SHA256SUMS
+curl -L -O https://github.com/your-org/phaeton/releases/download/<tag>/phaeton-v<version>-macos-arm64.tar.gz
+shasum -a 256 phaeton-v<version>-macos-arm64.tar.gz
+grep phaeton-v<version>-macos-arm64.tar.gz SHA256SUMS
 ```
 
 Install:
 
 ```bash
-tar -xzf phaeton-<artifact>.tar.gz
+tar -xzf phaeton-v<version>-<artifact>.tar.gz
 sudo install -m 0755 phaeton /usr/local/bin/phaeton
 ```
 
@@ -120,9 +120,9 @@ Phaeton supports cross-compilation for multiple architectures to run on differen
 ```
 
 This will create release binaries in the `dist/` directory for:
-- **Cerbo GX (ARM v7)**: `phaeton-armv7-unknown-linux-gnueabihf.tar.gz`
-- **Linux ARM64**: `phaeton-aarch64-unknown-linux-gnu.tar.gz`
-- **macOS ARM64**: `phaeton-macos-arm64.tar.gz`
+- **Cerbo GX (ARM v7)**: `phaeton-v<version>-armv7-unknown-linux-gnueabihf.tar.gz`
+- **Linux ARM64**: `phaeton-v<version>-aarch64-unknown-linux-gnu.tar.gz`
+- **macOS ARM64**: `phaeton-v<version>-macos-arm64.tar.gz`
 
 #### GitHub Actions CI
 
