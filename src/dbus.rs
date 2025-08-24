@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use zbus::object_server::InterfaceRef;
 use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
-use zbus::{Connection, Result as ZbusResult, names::WellKnownName};
+use zbus::{Connection, Proxy, Result as ZbusResult, names::WellKnownName};
 
 #[derive(Default)]
 struct EvChargerValues {
@@ -21,10 +21,14 @@ struct EvChargerValues {
     product_name: String,
     firmware_version: String,
     serial: String,
+    product_id: u32,
+    connected: u8,
     // Controls and measurements
     mode: u8,
     start_stop: u8,
     set_current: f64,
+    max_current: f64,
+    current: f64,
     ac_power: f64,
     ac_energy_forward: f64,
     ac_current: f64,
@@ -40,6 +44,7 @@ struct EvChargerValues {
     l3_power: f64,
     status: u32,
     charging_time: i64,
+    position: u8,
 }
 
 struct EvCharger {
@@ -67,6 +72,16 @@ impl EvCharger {
     }
 
     #[zbus(property)]
+    fn product_id(&self) -> u32 {
+        self.values.lock().unwrap().product_id
+    }
+
+    #[zbus(property)]
+    fn connected(&self) -> u8 {
+        self.values.lock().unwrap().connected
+    }
+
+    #[zbus(property)]
     fn serial(&self) -> String {
         self.values.lock().unwrap().serial.clone()
     }
@@ -84,6 +99,16 @@ impl EvCharger {
     #[zbus(property)]
     fn set_current(&self) -> f64 {
         self.values.lock().unwrap().set_current
+    }
+
+    #[zbus(property)]
+    fn max_current(&self) -> f64 {
+        self.values.lock().unwrap().max_current
+    }
+
+    #[zbus(property)]
+    fn current(&self) -> f64 {
+        self.values.lock().unwrap().current
     }
 
     #[zbus(property)]
@@ -153,6 +178,11 @@ impl EvCharger {
     #[zbus(property)]
     fn charging_time(&self) -> i64 {
         self.values.lock().unwrap().charging_time
+    }
+
+    #[zbus(property)]
+    fn position(&self) -> u8 {
+        self.values.lock().unwrap().position
     }
 
     // Property setters to control the driver
@@ -248,6 +278,12 @@ impl DbusService {
             shared
                 .paths
                 .insert("/Serial".to_string(), serde_json::json!("Unknown"));
+            shared
+                .paths
+                .insert("/ProductId".to_string(), serde_json::json!(0xC024u32));
+            shared
+                .paths
+                .insert("/Connected".to_string(), serde_json::json!(0u8));
             shared
                 .paths
                 .insert("/Ac/Energy/Forward".to_string(), serde_json::json!(0.0));
@@ -357,10 +393,22 @@ impl DbusService {
                         obj.values.lock().unwrap().firmware_version = v.to_string();
                     }
                 }
+                "/ProductId" => {
+                    if let Some(v) = value.as_u64() {
+                        let obj = iface.get_mut().await;
+                        obj.values.lock().unwrap().product_id = v as u32;
+                    }
+                }
                 "/Serial" => {
                     if let Some(v) = value.as_str() {
                         let obj = iface.get_mut().await;
                         obj.values.lock().unwrap().serial = v.to_string();
+                    }
+                }
+                "/Connected" => {
+                    if let Some(v) = value.as_u64() {
+                        let obj = iface.get_mut().await;
+                        obj.values.lock().unwrap().connected = v as u8;
                     }
                 }
                 "/Mode" => {
@@ -379,6 +427,18 @@ impl DbusService {
                     if let Some(v) = value.as_f64() {
                         let obj = iface.get_mut().await;
                         obj.values.lock().unwrap().set_current = v;
+                    }
+                }
+                "/MaxCurrent" => {
+                    if let Some(v) = value.as_f64() {
+                        let obj = iface.get_mut().await;
+                        obj.values.lock().unwrap().max_current = v;
+                    }
+                }
+                "/Current" => {
+                    if let Some(v) = value.as_f64() {
+                        let obj = iface.get_mut().await;
+                        obj.values.lock().unwrap().current = v;
                     }
                 }
                 "/Ac/Power" => {
@@ -474,6 +534,12 @@ impl DbusService {
                         obj.values.lock().unwrap().charging_time = v as i64;
                     }
                 }
+                "/Position" => {
+                    if let Some(v) = value.as_u64() {
+                        let obj = iface.get_mut().await;
+                        obj.values.lock().unwrap().position = v as u8;
+                    }
+                }
                 _ => {}
             }
         }
@@ -508,6 +574,33 @@ impl DbusService {
             .await?;
         Ok(())
     }
+}
+
+impl DbusService {
+    /// Read a value from another Victron D-Bus service implementing com.victronenergy.BusItem
+    pub async fn read_remote_value(
+        &self,
+        service_name: &str,
+        path: &str,
+    ) -> Result<serde_json::Value> {
+        let conn = match &self.connection {
+            Some(c) => c,
+            None => return Err(PhaetonError::dbus("No D-Bus connection available")),
+        };
+
+        let proxy = Proxy::new(conn, service_name, path, "com.victronenergy.BusItem")
+            .await
+            .map_err(|e| PhaetonError::dbus(format!("Proxy creation failed: {}", e)))?;
+
+        let val: OwnedValue = proxy
+            .call("GetValue", &())
+            .await
+            .map_err(|e| PhaetonError::dbus(format!("GetValue call failed: {}", e)))?;
+
+        Ok(BusItem::owned_value_to_serde(&val))
+    }
+
+    // Removed grid strategy helper per design decision (not needed)
 }
 
 /// Shared state for BusItems

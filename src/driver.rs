@@ -410,7 +410,7 @@ impl AlfenDriver {
     async fn poll_cycle(&mut self) -> Result<()> {
         self.logger.debug("Starting poll cycle");
         // Read measurements from Modbus
-        if let Some(manager) = &mut self.modbus_manager {
+        if self.modbus_manager.is_some() {
             let socket_id = self.config.modbus.socket_slave_id;
             let addr_voltages = self.config.registers.voltages;
             let addr_currents = self.config.registers.currents;
@@ -421,127 +421,147 @@ impl AlfenDriver {
             let station_id = self.config.modbus.station_slave_id;
             let addr_station_max = self.config.registers.station_max_current;
 
-            // Voltages L1..L3 (6 registers -> 3 floats)
-            let voltages = manager
-                .execute_with_reconnect(|client| {
-                    Box::pin(async move {
-                        client
-                            .read_holding_registers(socket_id, addr_voltages, 6)
-                            .await
+            // Read all required Modbus blocks within a limited mutable borrow scope
+            let (l1_v, l2_v, l3_v, l1_i, l2_i, l3_i, l1_p, l2_p, l3_p, p_total, energy_kwh, status): (
+                f64,
+                f64,
+                f64,
+                f64,
+                f64,
+                f64,
+                f64,
+                f64,
+                f64,
+                f64,
+                f64,
+                i32,
+            ) = {
+                let manager = self.modbus_manager.as_mut().unwrap();
+
+                // Voltages L1..L3 (6 registers -> 3 floats)
+                let voltages = manager
+                    .execute_with_reconnect(|client| {
+                        Box::pin(async move {
+                            client
+                                .read_holding_registers(socket_id, addr_voltages, 6)
+                                .await
+                        })
                     })
-                })
-                .await
-                .ok();
+                    .await
+                    .ok();
 
-            // Currents L1..L3 (6 registers -> 3 floats)
-            let currents = manager
-                .execute_with_reconnect(|client| {
-                    Box::pin(async move {
-                        client
-                            .read_holding_registers(socket_id, addr_currents, 6)
-                            .await
+                // Currents L1..L3 (6 registers -> 3 floats)
+                let currents = manager
+                    .execute_with_reconnect(|client| {
+                        Box::pin(async move {
+                            client
+                                .read_holding_registers(socket_id, addr_currents, 6)
+                                .await
+                        })
                     })
-                })
-                .await
-                .ok();
+                    .await
+                    .ok();
 
-            // Power block (8 registers -> 3 phases + total)
-            let power_regs = manager
-                .execute_with_reconnect(|client| {
-                    Box::pin(async move {
-                        client
-                            .read_holding_registers(socket_id, addr_power, 8)
-                            .await
+                // Power block (8 registers -> 3 phases + total)
+                let power_regs = manager
+                    .execute_with_reconnect(|client| {
+                        Box::pin(async move {
+                            client
+                                .read_holding_registers(socket_id, addr_power, 8)
+                                .await
+                        })
                     })
-                })
-                .await
-                .ok();
+                    .await
+                    .ok();
 
-            // Energy (4 registers -> f64 Wh)
-            let energy_regs = manager
-                .execute_with_reconnect(|client| {
-                    Box::pin(async move {
-                        client
-                            .read_holding_registers(socket_id, addr_energy, 4)
-                            .await
+                // Energy (4 registers -> f64 Wh)
+                let energy_regs = manager
+                    .execute_with_reconnect(|client| {
+                        Box::pin(async move {
+                            client
+                                .read_holding_registers(socket_id, addr_energy, 4)
+                                .await
+                        })
                     })
-                })
-                .await
-                .ok();
+                    .await
+                    .ok();
 
-            // Socket status string (5 registers)
-            let status_regs = manager
-                .execute_with_reconnect(|client| {
-                    Box::pin(async move {
-                        client
-                            .read_holding_registers(socket_id, addr_status, 5)
-                            .await
+                // Socket status string (5 registers)
+                let status_regs = manager
+                    .execute_with_reconnect(|client| {
+                        Box::pin(async move {
+                            client
+                                .read_holding_registers(socket_id, addr_status, 5)
+                                .await
+                        })
                     })
-                })
-                .await
-                .ok();
+                    .await
+                    .ok();
 
-            // Station max current (optional refresh)
-            if let Ok(max_regs) = manager
-                .execute_with_reconnect(|client| {
-                    Box::pin(async move {
-                        client
-                            .read_holding_registers(station_id, addr_station_max, 2)
-                            .await
+                // Station max current (optional refresh)
+                if let Ok(max_regs) = manager
+                    .execute_with_reconnect(|client| {
+                        Box::pin(async move {
+                            client
+                                .read_holding_registers(station_id, addr_station_max, 2)
+                                .await
+                        })
                     })
-                })
-                .await
-                && max_regs.len() >= 2
-                && let Ok(max_c) = decode_32bit_float(&max_regs[0..2])
-                && max_c.is_finite()
-                && max_c > 0.0
-            {
-                self.station_max_current = max_c;
-            }
-
-            // Decode values with safe fallbacks
-            let (l1_v, l2_v, l3_v) = match voltages {
-                Some(v) if v.len() >= 6 => (
-                    decode_32bit_float(&v[0..2]).unwrap_or(0.0),
-                    decode_32bit_float(&v[2..4]).unwrap_or(0.0),
-                    decode_32bit_float(&v[4..6]).unwrap_or(0.0),
-                ),
-                _ => (0.0, 0.0, 0.0),
-            };
-
-            let (l1_i, l2_i, l3_i) = match currents {
-                Some(v) if v.len() >= 6 => (
-                    decode_32bit_float(&v[0..2]).unwrap_or(0.0),
-                    decode_32bit_float(&v[2..4]).unwrap_or(0.0),
-                    decode_32bit_float(&v[4..6]).unwrap_or(0.0),
-                ),
-                _ => (0.0, 0.0, 0.0),
-            };
-
-            let (l1_p, l2_p, l3_p, p_total) = match power_regs {
-                Some(v) if v.len() >= 8 => (
-                    decode_32bit_float(&v[0..2]).unwrap_or(0.0) as f64,
-                    decode_32bit_float(&v[2..4]).unwrap_or(0.0) as f64,
-                    decode_32bit_float(&v[4..6]).unwrap_or(0.0) as f64,
-                    decode_32bit_float(&v[6..8]).unwrap_or(0.0) as f64,
-                ),
-                _ => (0.0, 0.0, 0.0, 0.0),
-            };
-
-            let energy_wh = match energy_regs {
-                Some(v) if v.len() >= 4 => decode_64bit_float(&v[0..4]).unwrap_or(0.0),
-                _ => 0.0,
-            };
-            let energy_kwh = energy_wh / 1000.0;
-
-            let status_u8 = match status_regs {
-                Some(v) if v.len() >= 5 => {
-                    let s = decode_string(&v[0..5], None).unwrap_or_default();
-                    Self::map_alfen_status_to_victron(&s) as i32
+                    .await
+                    && max_regs.len() >= 2
+                    && let Ok(max_c) = decode_32bit_float(&max_regs[0..2])
+                    && max_c.is_finite()
+                    && max_c > 0.0
+                {
+                    self.station_max_current = max_c;
                 }
-                _ => 0,
+
+                // Decode values with safe fallbacks
+                let (l1_v, l2_v, l3_v) = match voltages {
+                    Some(v) if v.len() >= 6 => (
+                        decode_32bit_float(&v[0..2]).unwrap_or(0.0) as f64,
+                        decode_32bit_float(&v[2..4]).unwrap_or(0.0) as f64,
+                        decode_32bit_float(&v[4..6]).unwrap_or(0.0) as f64,
+                    ),
+                    _ => (0.0, 0.0, 0.0),
+                };
+
+                let (l1_i, l2_i, l3_i) = match currents {
+                    Some(v) if v.len() >= 6 => (
+                        decode_32bit_float(&v[0..2]).unwrap_or(0.0) as f64,
+                        decode_32bit_float(&v[2..4]).unwrap_or(0.0) as f64,
+                        decode_32bit_float(&v[4..6]).unwrap_or(0.0) as f64,
+                    ),
+                    _ => (0.0, 0.0, 0.0),
+                };
+
+                let (l1_p, l2_p, l3_p, p_total) = match power_regs {
+                    Some(v) if v.len() >= 8 => (
+                        decode_32bit_float(&v[0..2]).unwrap_or(0.0) as f64,
+                        decode_32bit_float(&v[2..4]).unwrap_or(0.0) as f64,
+                        decode_32bit_float(&v[4..6]).unwrap_or(0.0) as f64,
+                        decode_32bit_float(&v[6..8]).unwrap_or(0.0) as f64,
+                    ),
+                    _ => (0.0, 0.0, 0.0, 0.0),
+                };
+
+                let energy_wh = match energy_regs {
+                    Some(v) if v.len() >= 4 => decode_64bit_float(&v[0..4]).unwrap_or(0.0),
+                    _ => 0.0,
+                };
+                let energy_kwh = energy_wh / 1000.0;
+
+                let status_u8 = match status_regs {
+                    Some(v) if v.len() >= 5 => {
+                        let s = decode_string(&v[0..5], None).unwrap_or_default();
+                        Self::map_alfen_status_to_victron(&s) as i32
+                    }
+                    _ => 0,
+                };
+                let status = status_u8 as i32;
+
+                (l1_v, l2_v, l3_v, l1_i, l2_i, l3_i, l1_p, l2_p, l3_p, p_total, energy_kwh, status)
             };
-            let status = status_u8 as i32;
 
             // Control logic: compute effective current and write via Modbus if needed
             let now_secs = (std::time::SystemTime::now()
@@ -549,6 +569,12 @@ impl AlfenDriver {
                 .unwrap_or_default())
             .as_secs_f64();
             let requested = self.intended_set_current;
+
+            // Calculate PV excess power from Victron system (AC+DC PV minus AC loads excluding EV charger itself)
+            let excess_pv_power_w: f32 = match self.calculate_excess_pv_power(p_total).await {
+                Some(v) => v,
+                None => 0.0,
+            };
             let effective: f32 = self
                 .controls
                 .compute_effective_current(
@@ -557,7 +583,7 @@ impl AlfenDriver {
                     requested,
                     self.station_max_current,
                     now_secs,
-                    Some(p_total as f32),
+                    Some(excess_pv_power_w),
                     &self.config,
                 )
                 .await
@@ -569,7 +595,11 @@ impl AlfenDriver {
                 > self.config.controls.update_difference_threshold;
             if need_watchdog || need_change {
                 let regs = crate::modbus::encode_32bit_float(effective);
-                let write_res = manager
+                // Borrow modbus manager only for the write
+                let write_res = self
+                    .modbus_manager
+                    .as_mut()
+                    .unwrap()
                     .execute_with_reconnect(|client| {
                         let regs_vec = vec![regs[0], regs[1]];
                         Box::pin(async move {
@@ -796,6 +826,39 @@ impl AlfenDriver {
     /// Subscribe to status updates (for SSE)
     pub fn subscribe_status(&self) -> broadcast::Receiver<String> {
         self.status_tx.subscribe()
+    }
+}
+
+impl AlfenDriver {
+    /// Compute excess PV power (W) using Victron D-Bus system values:
+    /// total_pv = Dc/Pv/Power + sum(Ac/PvOnOutput/L{1,2,3}/Power)
+    /// consumption = sum(Ac/Consumption/L{1,2,3}/Power)
+    /// excess = max(0, total_pv - (consumption - ev_power))
+    async fn calculate_excess_pv_power(&self, ev_power_w: f64) -> Option<f32> {
+        let dbus = self.dbus.as_ref()?;
+        // Helper to read f64, defaulting to 0
+        async fn get_f64(svc: &crate::dbus::DbusService, path: &str) -> f64 {
+            match svc.read_remote_value("com.victronenergy.system", path).await {
+                Ok(v) => v.as_f64().or_else(|| v.as_i64().map(|x| x as f64)).or_else(|| v.as_u64().map(|x| x as f64)).unwrap_or(0.0),
+                Err(_) => 0.0,
+            }
+        }
+
+        let dc_pv = get_f64(dbus, "/Dc/Pv/Power").await;
+        let ac_pv_l1 = get_f64(dbus, "/Ac/PvOnOutput/L1/Power").await;
+        let ac_pv_l2 = get_f64(dbus, "/Ac/PvOnOutput/L2/Power").await;
+        let ac_pv_l3 = get_f64(dbus, "/Ac/PvOnOutput/L3/Power").await;
+        let total_pv = dc_pv + ac_pv_l1 + ac_pv_l2 + ac_pv_l3;
+
+        let cons_l1 = get_f64(dbus, "/Ac/Consumption/L1/Power").await;
+        let cons_l2 = get_f64(dbus, "/Ac/Consumption/L2/Power").await;
+        let cons_l3 = get_f64(dbus, "/Ac/Consumption/L3/Power").await;
+        let consumption = cons_l1 + cons_l2 + cons_l3;
+
+        // Subtract EV charger itself from consumption
+        let adjusted_consumption = (consumption - ev_power_w).max(0.0);
+        let excess = (total_pv - adjusted_consumption).max(0.0);
+        Some(excess as f32)
     }
 }
 
