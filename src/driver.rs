@@ -818,8 +818,12 @@ impl AlfenDriver {
 
     pub fn get_db_value(&self, path: &str) -> Option<serde_json::Value> {
         if let Some(d) = &self.dbus {
-            let guard = futures::executor::block_on(d.lock());
-            guard.get(path)
+            // Avoid blocking the async runtime: use a non-blocking try_lock.
+            if let Ok(guard) = d.try_lock() {
+                guard.get(path)
+            } else {
+                None
+            }
         } else {
             None
         }
