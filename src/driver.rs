@@ -13,6 +13,8 @@ use crate::modbus::{
 };
 use crate::persistence::PersistenceManager;
 use crate::session::ChargingSessionManager;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio::time::{Duration, interval};
 
@@ -29,12 +31,70 @@ pub enum DriverState {
     ShuttingDown,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DriverSnapshot {
+    pub timestamp: String,
+    pub mode: u8,
+    pub start_stop: u8,
+    pub set_current: f32,
+    pub station_max_current: f32,
+    pub device_instance: u32,
+    pub product_name: Option<String>,
+    pub firmware: Option<String>,
+    pub serial: Option<String>,
+    pub status: u32,
+    pub active_phases: u8,
+    pub ac_power: f64,
+    pub ac_current: f64,
+    pub l1_voltage: f64,
+    pub l2_voltage: f64,
+    pub l3_voltage: f64,
+    pub l1_current: f64,
+    pub l2_current: f64,
+    pub l3_current: f64,
+    pub l1_power: f64,
+    pub l2_power: f64,
+    pub l3_power: f64,
+    pub total_energy_kwh: f64,
+    pub pricing_currency: Option<String>,
+    pub energy_rate: Option<f64>,
+    pub session: serde_json::Value,
+    pub poll_duration_ms: Option<u64>,
+    pub total_polls: u64,
+    pub overrun_count: u64,
+    pub poll_interval_ms: u64,
+    pub excess_pv_power_w: f32,
+}
+
 /// Commands accepted by the driver from external components (web, etc.)
 #[derive(Debug, Clone)]
 pub enum DriverCommand {
     SetMode(u8),
     SetStartStop(u8),
     SetCurrent(f32),
+}
+
+/// Measurements sampled from Modbus by the worker
+struct Measurements {
+    l1_v: f64,
+    l2_v: f64,
+    l3_v: f64,
+    l1_i: f64,
+    l2_i: f64,
+    l3_i: f64,
+    l1_p: f64,
+    l2_p: f64,
+    l3_p: f64,
+    p_total: f64,
+    energy_kwh: f64,
+    status_base: i32,
+    duration_ms: u64,
+    overran: bool,
+}
+
+/// Commands to the Modbus worker
+enum ModbusCommand {
+    WriteSetCurrent(f32),
 }
 
 /// Main driver for Phaeton
@@ -87,6 +147,35 @@ pub struct AlfenDriver {
 
     /// Broadcast channel for streaming live status updates (SSE)
     status_tx: broadcast::Sender<String>,
+
+    /// Watch channel for full status snapshot consumed by web and other readers
+    status_snapshot_tx: watch::Sender<Arc<DriverSnapshot>>,
+    status_snapshot_rx: watch::Receiver<Arc<DriverSnapshot>>,
+
+    // Last measured values (from Modbus) for snapshot building
+    last_l1_voltage: f64,
+    last_l2_voltage: f64,
+    last_l3_voltage: f64,
+    last_l1_current: f64,
+    last_l2_current: f64,
+    last_l3_current: f64,
+    last_l1_power: f64,
+    last_l2_power: f64,
+    last_l3_power: f64,
+    last_total_power: f64,
+    last_energy_kwh: f64,
+
+    // Identity cache (to avoid depending on DBus for UI identity fields)
+    product_name: Option<String>,
+    firmware_version: Option<String>,
+    serial: Option<String>,
+
+    // Poll metrics
+    total_polls: u64,
+    overrun_count: u64,
+
+    // Last computed PV excess power
+    last_excess_pv_power_w: f32,
 }
 
 impl AlfenDriver {
@@ -149,6 +238,43 @@ impl AlfenDriver {
         // Create status broadcast channel
         let (status_tx, _status_rx) = broadcast::channel::<String>(100);
 
+        // Create status snapshot channel (initialized with empty object)
+        let initial_snapshot = Arc::new(DriverSnapshot {
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            mode: 0,
+            start_stop: 0,
+            set_current: 0.0,
+            station_max_current: 0.0,
+            device_instance: config.device_instance,
+            product_name: None,
+            firmware: None,
+            serial: None,
+            status: 0,
+            active_phases: 0,
+            ac_power: 0.0,
+            ac_current: 0.0,
+            l1_voltage: 0.0,
+            l2_voltage: 0.0,
+            l3_voltage: 0.0,
+            l1_current: 0.0,
+            l2_current: 0.0,
+            l3_current: 0.0,
+            l1_power: 0.0,
+            l2_power: 0.0,
+            l3_power: 0.0,
+            total_energy_kwh: 0.0,
+            pricing_currency: None,
+            energy_rate: None,
+            session: serde_json::json!({}),
+            poll_duration_ms: None,
+            total_polls: 0,
+            overrun_count: 0,
+            poll_interval_ms: config.poll_interval_ms,
+            excess_pv_power_w: 0.0,
+        });
+        let (status_snapshot_tx, status_snapshot_rx) =
+            watch::channel::<Arc<DriverSnapshot>>(initial_snapshot);
+
         Ok(Self {
             config,
             state: state_tx,
@@ -170,6 +296,25 @@ impl AlfenDriver {
             commands_rx,
             commands_tx,
             status_tx,
+            status_snapshot_tx,
+            status_snapshot_rx,
+            last_l1_voltage: 0.0,
+            last_l2_voltage: 0.0,
+            last_l3_voltage: 0.0,
+            last_l1_current: 0.0,
+            last_l2_current: 0.0,
+            last_l3_current: 0.0,
+            last_l1_power: 0.0,
+            last_l2_power: 0.0,
+            last_l3_power: 0.0,
+            last_total_power: 0.0,
+            last_energy_kwh: 0.0,
+            product_name: None,
+            firmware_version: None,
+            serial: None,
+            total_polls: 0,
+            overrun_count: 0,
+            last_excess_pv_power_w: 0.0,
         })
     }
 
@@ -211,9 +356,15 @@ impl AlfenDriver {
         loop {
             tokio::select! {
                 _ = poll_interval.tick() => {
+                    let poll_started = std::time::Instant::now();
                     if let Err(e) = self.poll_cycle().await {
                         self.logger.error(&format!("Poll cycle failed: {}", e));
                         // Continue polling even on errors
+                    }
+                    let dur_ms = poll_started.elapsed().as_millis() as u64;
+                    self.total_polls = self.total_polls.saturating_add(1);
+                    if dur_ms > self.config.poll_interval_ms {
+                        self.overrun_count = self.overrun_count.saturating_add(1);
                     }
                 }
                 Some(cmd) = self.commands_rx.recv() => {
@@ -507,67 +658,20 @@ impl AlfenDriver {
                 .set_section("session", self.sessions.get_state());
             let _ = self.persistence.save();
 
-            // D-Bus metrics (publish authoritative values)
-            if let Some(dbus) = &mut self.dbus {
-                let mut updates = Vec::with_capacity(16);
-                updates.push(("/Ac/L1/Voltage".to_string(), serde_json::json!(l1_v)));
-                updates.push(("/Ac/L2/Voltage".to_string(), serde_json::json!(l2_v)));
-                updates.push(("/Ac/L3/Voltage".to_string(), serde_json::json!(l3_v)));
-                updates.push(("/Ac/L1/Current".to_string(), serde_json::json!(l1_i)));
-                updates.push(("/Ac/L2/Current".to_string(), serde_json::json!(l2_i)));
-                updates.push(("/Ac/L3/Current".to_string(), serde_json::json!(l3_i)));
-                updates.push(("/Ac/L1/Power".to_string(), serde_json::json!(l1_p)));
-                updates.push(("/Ac/L2/Power".to_string(), serde_json::json!(l2_p)));
-                updates.push(("/Ac/L3/Power".to_string(), serde_json::json!(l3_p)));
-                updates.push(("/Ac/Power".to_string(), serde_json::json!(p_total)));
-                updates.push(("/Status".to_string(), serde_json::json!(status)));
-                updates.push((
-                    "/MaxCurrent".to_string(),
-                    serde_json::json!(self.station_max_current),
-                ));
-                // Session energy forward: from active or last session, else 0.0
-                let stats = self.sessions.get_session_stats();
-                let energy_forward = stats
-                    .get("energy_delivered_kwh")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(0.0);
-                updates.push((
-                    "/Ac/Energy/Forward".to_string(),
-                    serde_json::json!(energy_forward),
-                ));
-                // Total lifetime energy (kWh) from meter reading
-                updates.push((
-                    "/Ac/Energy/Total".to_string(),
-                    serde_json::json!(energy_kwh),
-                ));
-                // Derived paths
-                let max_phase_current = l1_i.max(l2_i.max(l3_i));
-                updates.push((
-                    "/Ac/Current".to_string(),
-                    serde_json::json!(max_phase_current),
-                ));
-                updates.push(("/Current".to_string(), serde_json::json!(max_phase_current)));
-                // Also publish the requested set current as authoritative value
-                updates.push((
-                    "/SetCurrent".to_string(),
-                    serde_json::json!(self.intended_set_current as f64),
-                ));
-                let phase_count = [l1_i, l2_i, l3_i]
-                    .iter()
-                    .filter(|v| v.is_finite() && v.abs() > 0.01)
-                    .count();
-                updates.push(("/Ac/PhaseCount".to_string(), serde_json::json!(phase_count)));
-                let charging_time_sec = stats
-                    .get("session_duration_min")
-                    .and_then(|v| v.as_f64())
-                    .map(|m| (m * 60.0).round() as i64)
-                    .unwrap_or(0);
-                updates.push((
-                    "/ChargingTime".to_string(),
-                    serde_json::json!(charging_time_sec),
-                ));
-                dbus.update_paths(updates).await?;
-            }
+            // D-Bus export moved to a dedicated task (exporter) that consumes snapshots
+
+            // Store last measured values for snapshot
+            self.last_l1_voltage = l1_v;
+            self.last_l2_voltage = l2_v;
+            self.last_l3_voltage = l3_v;
+            self.last_l1_current = l1_i;
+            self.last_l2_current = l2_i;
+            self.last_l3_current = l3_i;
+            self.last_l1_power = l1_p;
+            self.last_l2_power = l2_p;
+            self.last_l3_power = l3_p;
+            self.last_total_power = p_total;
+            self.last_energy_kwh = energy_kwh;
 
             // Log a concise summary
             self.logger.debug(&format!(
@@ -597,6 +701,10 @@ impl AlfenDriver {
         }
 
         self.logger.debug("Poll cycle completed");
+
+        // Publish a status snapshot for consumers (web, etc.)
+        let snapshot = Arc::new(self.build_typed_snapshot(Some(self.last_poll_duration_ms())));
+        let _ = self.status_snapshot_tx.send(snapshot);
         Ok(())
     }
 
@@ -732,6 +840,224 @@ impl AlfenDriver {
 }
 
 impl AlfenDriver {
+    /// Build a consolidated status snapshot for API/consumers (legacy JSON builder; kept for reference but unused)
+    #[allow(dead_code)]
+    fn build_status_snapshot_value(&self) -> serde_json::Value {
+        let mut root = serde_json::json!({
+            "mode": self.current_mode_code(),
+            "start_stop": self.start_stop_code(),
+            "set_current": self.get_intended_set_current(),
+            "station_max_current": self.get_station_max_current(),
+            "device_instance": self.config().device_instance,
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+        });
+
+        // Identity (prefer cached identity; fall back to DBus cache)
+        if let Some(p) = self.product_name.as_ref() {
+            root["product_name"] = serde_json::json!(p);
+        } else if let Some(v) = self.get_db_value("/ProductName") {
+            root["product_name"] = v;
+        }
+        if let Some(s) = self.serial.as_ref() {
+            root["serial"] = serde_json::json!(s);
+        } else if let Some(v) = self.get_db_value("/Serial") {
+            root["serial"] = v;
+        }
+        if let Some(fw) = self.firmware_version.as_ref() {
+            root["firmware"] = serde_json::json!(fw);
+        } else if let Some(v) = self.get_db_value("/FirmwareVersion") {
+            root["firmware"] = v;
+        }
+
+        // Status & phases
+        root["status"] = serde_json::json!(self.last_status as u32);
+        let phase_count = [
+            self.last_l1_current,
+            self.last_l2_current,
+            self.last_l3_current,
+        ]
+        .iter()
+        .filter(|v| v.is_finite() && v.abs() > 0.01)
+        .count();
+        root["active_phases"] = serde_json::json!(phase_count);
+
+        // Power & currents from last measured values to avoid DBus dependency
+        root["ac_power"] = serde_json::json!(self.last_total_power);
+        let max_phase_current = self
+            .last_l1_current
+            .max(self.last_l2_current.max(self.last_l3_current));
+        root["ac_current"] = serde_json::json!(max_phase_current);
+        root["l1_voltage"] = serde_json::json!(self.last_l1_voltage);
+        root["l2_voltage"] = serde_json::json!(self.last_l2_voltage);
+        root["l3_voltage"] = serde_json::json!(self.last_l3_voltage);
+        root["l1_current"] = serde_json::json!(self.last_l1_current);
+        root["l2_current"] = serde_json::json!(self.last_l2_current);
+        root["l3_current"] = serde_json::json!(self.last_l3_current);
+        root["l1_power"] = serde_json::json!(self.last_l1_power);
+        root["l2_power"] = serde_json::json!(self.last_l2_power);
+        root["l3_power"] = serde_json::json!(self.last_l3_power);
+
+        // Session
+        let mut session = serde_json::json!({});
+        // Charging time based on session stats (no DBus dependency)
+        let stats = self.sessions.get_session_stats();
+        let charging_time_sec = stats
+            .get("session_duration_min")
+            .and_then(|v| v.as_f64())
+            .map(|m| (m * 60.0).round() as i64)
+            .unwrap_or(0);
+        session["charging_time_sec"] = serde_json::json!(charging_time_sec);
+        if let Some(v) = self.get_db_value("/Ac/Energy/Forward") {
+            session["energy_delivered_kwh"] = v;
+        }
+        let sessions_state = self.sessions_snapshot();
+        if let Some(obj) = sessions_state.as_object() {
+            if let Some(cur) = obj.get("current_session").and_then(|v| v.as_object()) {
+                if let Some(ts) = cur.get("start_time") {
+                    session["start_ts"] = ts.clone();
+                }
+                if let Some(v) = cur.get("energy_delivered_kwh") {
+                    session["energy_delivered_kwh"] = v.clone();
+                }
+            }
+            if let Some(last) = obj.get("last_session").and_then(|v| v.as_object()) {
+                if session.get("start_ts").is_none()
+                    && let Some(ts) = last.get("start_time")
+                {
+                    session["start_ts"] = ts.clone();
+                }
+                if let Some(ts) = last.get("end_time") {
+                    session["end_ts"] = ts.clone();
+                }
+                if session.get("energy_delivered_kwh").is_none()
+                    && let Some(v) = last.get("energy_delivered_kwh")
+                {
+                    session["energy_delivered_kwh"] = v.clone();
+                }
+                if let Some(v) = last.get("cost") {
+                    session["cost"] = v.clone();
+                }
+            }
+        }
+
+        // Pricing
+        let pricing = &self.config().pricing;
+        if !pricing.currency_symbol.is_empty() {
+            root["pricing_currency"] = serde_json::json!(pricing.currency_symbol.clone());
+        }
+        if pricing.source.to_lowercase() == "static" {
+            root["energy_rate"] = serde_json::json!(pricing.static_rate_eur_per_kwh);
+        }
+
+        root["total_energy_kwh"] = serde_json::json!(self.last_energy_kwh);
+
+        root["session"] = session;
+
+        root
+    }
+
+    /// Subscribe to snapshots
+    pub fn subscribe_snapshot(&self) -> watch::Receiver<Arc<DriverSnapshot>> {
+        self.status_snapshot_rx.clone()
+    }
+
+    /// Build typed snapshot struct; optional poll duration to include metrics
+    fn build_typed_snapshot(&self, poll_duration_ms: Option<u64>) -> DriverSnapshot {
+        let phase_count = [
+            self.last_l1_current,
+            self.last_l2_current,
+            self.last_l3_current,
+        ]
+        .iter()
+        .filter(|v| v.is_finite() && v.abs() > 0.01)
+        .count() as u8;
+        let ac_current = self
+            .last_l1_current
+            .max(self.last_l2_current.max(self.last_l3_current));
+        let pricing_currency =
+            Some(self.config().pricing.currency_symbol.clone()).filter(|sym| !sym.is_empty());
+        let energy_rate = if self.config().pricing.source.to_lowercase() == "static" {
+            Some(self.config().pricing.static_rate_eur_per_kwh)
+        } else {
+            None
+        };
+        let session = {
+            let mut s = serde_json::json!({});
+            let stats = self.sessions.get_session_stats();
+            let charging_time_sec = stats
+                .get("session_duration_min")
+                .and_then(|v| v.as_f64())
+                .map(|m| (m * 60.0).round() as i64)
+                .unwrap_or(0);
+            s["charging_time_sec"] = serde_json::json!(charging_time_sec);
+            let sessions_state = self.sessions_snapshot();
+            if let Some(obj) = sessions_state.as_object() {
+                if let Some(cur) = obj.get("current_session").and_then(|v| v.as_object()) {
+                    if let Some(ts) = cur.get("start_time") {
+                        s["start_ts"] = ts.clone();
+                    }
+                    if let Some(v) = cur.get("energy_delivered_kwh") {
+                        s["energy_delivered_kwh"] = v.clone();
+                    }
+                }
+                if let Some(last) = obj.get("last_session").and_then(|v| v.as_object()) {
+                    if s.get("start_ts").is_none()
+                        && let Some(ts) = last.get("start_time")
+                    {
+                        s["start_ts"] = ts.clone();
+                    }
+                    if let Some(ts) = last.get("end_time") {
+                        s["end_ts"] = ts.clone();
+                    }
+                    if s.get("energy_delivered_kwh").is_none()
+                        && let Some(v) = last.get("energy_delivered_kwh")
+                    {
+                        s["energy_delivered_kwh"] = v.clone();
+                    }
+                    if let Some(v) = last.get("cost") {
+                        s["cost"] = v.clone();
+                    }
+                }
+            }
+            s
+        };
+
+        DriverSnapshot {
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            mode: self.current_mode_code(),
+            start_stop: self.start_stop_code(),
+            set_current: self.get_intended_set_current(),
+            station_max_current: self.get_station_max_current(),
+            device_instance: self.config().device_instance,
+            product_name: self.product_name.clone(),
+            firmware: self.firmware_version.clone(),
+            serial: self.serial.clone(),
+            status: self.last_status as u32,
+            active_phases: phase_count,
+            ac_power: self.last_total_power,
+            ac_current,
+            l1_voltage: self.last_l1_voltage,
+            l2_voltage: self.last_l2_voltage,
+            l3_voltage: self.last_l3_voltage,
+            l1_current: self.last_l1_current,
+            l2_current: self.last_l2_current,
+            l3_current: self.last_l3_current,
+            l1_power: self.last_l1_power,
+            l2_power: self.last_l2_power,
+            l3_power: self.last_l3_power,
+            total_energy_kwh: self.last_energy_kwh,
+            pricing_currency,
+            energy_rate,
+            session,
+            poll_duration_ms,
+            total_polls: self.total_polls,
+            overrun_count: self.overrun_count,
+            poll_interval_ms: self.config.poll_interval_ms,
+            excess_pv_power_w: self.last_excess_pv_power_w,
+        }
+    }
+}
+impl AlfenDriver {
     /// One-shot read of charger identity values via Modbus and publish to D-Bus, with logs
     async fn refresh_charger_identity(&mut self) -> Result<()> {
         if self.modbus_manager.is_none() || self.dbus.is_none() {
@@ -813,6 +1139,384 @@ impl AlfenDriver {
             }
         }
 
+        // Cache identity for snapshots
+        if !manufacturer.is_empty() {
+            self.product_name = Some(format!("{} EV Charger", manufacturer));
+        }
+        if !firmware.is_empty() {
+            self.firmware_version = Some(firmware.clone());
+        }
+        if !serial.is_empty() {
+            self.serial = Some(serial.clone());
+        }
+
+        Ok(())
+    }
+
+    /// Run the driver using a shared Arc<Mutex<AlfenDriver>> without holding the lock across the entire loop.
+    ///
+    /// This avoids starving other components (e.g., web server) that need brief access to the driver state.
+    pub async fn run_on_arc(driver: Arc<tokio::sync::Mutex<AlfenDriver>>) -> Result<()> {
+        // Initialization phase (performed under the lock, but only briefly)
+        {
+            let mut drv = driver.lock().await;
+            drv.logger.info("Starting EV charger driver main loop");
+            drv.initialize_modbus().await?;
+            drv.state.send(DriverState::Running).ok();
+            drv.intended_set_current = drv.config.defaults.intended_set_current;
+            drv.station_max_current = drv.config.defaults.station_max_current;
+        }
+
+        // Start D-Bus (performed separately to keep lock scopes small)
+        {
+            let mut drv = driver.lock().await;
+            match drv.try_start_dbus_with_identity().await {
+                Ok(_) => {}
+                Err(e) => {
+                    if drv.config.require_dbus {
+                        drv.logger.error(&format!(
+                            "Failed to initialize D-Bus and require_dbus=true: {}",
+                            e
+                        ));
+                        return Err(e);
+                    } else {
+                        drv.logger.warn(&format!(
+                            "D-Bus initialization failed but require_dbus=false, continuing without D-Bus: {}",
+                            e
+                        ));
+                    }
+                }
+            }
+        }
+
+        // Determine poll interval from config (read once under lock)
+        let poll_ms = {
+            let drv = driver.lock().await;
+            drv.config.poll_interval_ms
+        };
+
+        // Channels for worker coordination
+        let (meas_tx, mut meas_rx) = mpsc::unbounded_channel::<Measurements>();
+        let (mb_tx, mb_rx) = mpsc::unbounded_channel::<ModbusCommand>();
+
+        // Spawn Modbus worker on a dedicated single-thread Tokio runtime
+        {
+            let driver_for_task = driver.clone();
+            let meas_tx_clone = meas_tx.clone();
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("modbus runtime");
+                rt.block_on(async move {
+                    let cfg = {
+                        let drv = driver_for_task.lock().await;
+                        drv.config.clone()
+                    };
+                    let mut manager = ModbusConnectionManager::new(
+                        &cfg.modbus,
+                        cfg.controls.max_retries,
+                        Duration::from_secs_f64(cfg.controls.retry_delay),
+                    );
+                    let mut ticker = interval(Duration::from_millis(poll_ms));
+                    let mut cmd_rx = mb_rx;
+                    loop {
+                        tokio::select! {
+                            _ = ticker.tick() => {
+                                let poll_started = std::time::Instant::now();
+                                let socket_id = cfg.modbus.socket_slave_id;
+                                let addr_voltages = cfg.registers.voltages;
+                                let addr_currents = cfg.registers.currents;
+                                let addr_power = cfg.registers.power;
+                                let addr_energy = cfg.registers.energy;
+                                let addr_status = cfg.registers.status;
+                                let station_id = cfg.modbus.station_slave_id;
+                                let addr_station_max = cfg.registers.station_max_current;
+
+                                let voltages = manager.execute_with_reconnect(|client| {
+                                    Box::pin(async move { client.read_holding_registers(socket_id, addr_voltages, 6).await })
+                                }).await.ok();
+                                let currents = manager.execute_with_reconnect(|client| {
+                                    Box::pin(async move { client.read_holding_registers(socket_id, addr_currents, 6).await })
+                                }).await.ok();
+                                let power_regs = manager.execute_with_reconnect(|client| {
+                                    Box::pin(async move { client.read_holding_registers(socket_id, addr_power, 8).await })
+                                }).await.ok();
+                                let energy_regs = manager.execute_with_reconnect(|client| {
+                                    Box::pin(async move { client.read_holding_registers(socket_id, addr_energy, 4).await })
+                                }).await.ok();
+                                let status_regs = manager.execute_with_reconnect(|client| {
+                                    Box::pin(async move { client.read_holding_registers(socket_id, addr_status, 5).await })
+                                }).await.ok();
+                                if let Ok(max_regs) = manager.execute_with_reconnect(|client| {
+                                    Box::pin(async move { client.read_holding_registers(station_id, addr_station_max, 2).await })
+                                }).await
+                                    && max_regs.len() >= 2
+                                    && let Ok(max_c) = decode_32bit_float(&max_regs[0..2])
+                                    && max_c.is_finite() && max_c > 0.0
+                                {
+                                    let mut drv = driver_for_task.lock().await;
+                                    drv.station_max_current = max_c;
+                                }
+
+                                let (l1_v, l2_v, l3_v) = match voltages { Some(v) if v.len()>=6 => (
+                                    decode_32bit_float(&v[0..2]).unwrap_or(0.0) as f64,
+                                    decode_32bit_float(&v[2..4]).unwrap_or(0.0) as f64,
+                                    decode_32bit_float(&v[4..6]).unwrap_or(0.0) as f64,
+                                ), _ => (0.0,0.0,0.0)};
+                                let (l1_i, l2_i, l3_i) = match currents { Some(v) if v.len()>=6 => (
+                                    decode_32bit_float(&v[0..2]).unwrap_or(0.0) as f64,
+                                    decode_32bit_float(&v[2..4]).unwrap_or(0.0) as f64,
+                                    decode_32bit_float(&v[4..6]).unwrap_or(0.0) as f64,
+                                ), _ => (0.0,0.0,0.0)};
+                                let (l1_p, l2_p, l3_p, p_total) = match power_regs { Some(v) if v.len()>=8 => {
+                                    let p1=decode_32bit_float(&v[0..2]).unwrap_or(0.0) as f64;
+                                    let p2=decode_32bit_float(&v[2..4]).unwrap_or(0.0) as f64;
+                                    let p3=decode_32bit_float(&v[4..6]).unwrap_or(0.0) as f64;
+                                    let pt=decode_32bit_float(&v[6..8]).unwrap_or(0.0) as f64;
+                                    let s=|x:f64| if x.is_finite(){x}else{0.0};
+                                    (s(p1),s(p2),s(p3),s(pt))
+                                }, _ => (0.0,0.0,0.0,0.0)};
+                                let energy_kwh = match energy_regs { Some(v) if v.len()>=4 => decode_64bit_float(&v[0..4]).unwrap_or(0.0)/1000.0, _ => 0.0 };
+                                let status_base = match status_regs { Some(v) if v.len()>=5 => {
+                                    let s = decode_string(&v[0..5], None).unwrap_or_default();
+                                    AlfenDriver::map_alfen_status_to_victron(&s) as i32
+                                }, _ => 0 };
+
+                                let dur_ms = poll_started.elapsed().as_millis() as u64;
+                                let overran = dur_ms > cfg.poll_interval_ms;
+                                let _ = meas_tx_clone.send(Measurements { l1_v, l2_v, l3_v, l1_i, l2_i, l3_i, l1_p, l2_p, l3_p, p_total, energy_kwh, status_base, duration_ms: dur_ms, overran });
+                            }
+                            Some(cmd) = cmd_rx.recv() => {
+                                match cmd {
+                                    ModbusCommand::WriteSetCurrent(effective) => {
+                                        let regs = crate::modbus::encode_32bit_float(effective);
+                                        let v0 = regs[0];
+                                        let v1 = regs[1];
+                                        let sid = cfg.modbus.socket_slave_id;
+                                        let addr = cfg.registers.amps_config;
+                                        let _ = manager.execute_with_reconnect(move |client| {
+                                            Box::pin(async move {
+                                                let values = vec![v0, v1];
+                                                client.write_multiple_registers(sid, addr, &values).await
+                                            })
+                                        }).await;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            });
+        }
+
+        // Control task: consumes measurements, applies logic, updates state and snapshot, sends set current
+        {
+            let driver_for_task = driver.clone();
+            let mb_tx_clone = mb_tx.clone();
+            tokio::spawn(async move {
+                while let Some(m) = meas_rx.recv().await {
+                    let mut drv = driver_for_task.lock().await;
+                    // Process any pending external commands quickly
+                    loop {
+                        match drv.commands_rx.try_recv() {
+                            Ok(cmd) => drv.handle_command(cmd).await,
+                            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => break,
+                            Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => break,
+                        }
+                    }
+
+                    // Update measured values
+                    drv.last_l1_voltage = m.l1_v;
+                    drv.last_l2_voltage = m.l2_v;
+                    drv.last_l3_voltage = m.l3_v;
+                    drv.last_l1_current = m.l1_i;
+                    drv.last_l2_current = m.l2_i;
+                    drv.last_l3_current = m.l3_i;
+                    drv.last_l1_power = m.l1_p;
+                    drv.last_l2_power = m.l2_p;
+                    drv.last_l3_power = m.l3_p;
+                    drv.last_total_power = m.p_total;
+                    drv.last_energy_kwh = m.energy_kwh;
+
+                    // Derive extended status & session transitions
+                    let mut status = m.status_base;
+                    let connected = status == 1 || status == 2;
+                    if connected {
+                        if matches!(drv.start_stop, StartStopState::Stopped) {
+                            status = 6;
+                        } else if matches!(drv.current_mode, ChargingMode::Auto) {
+                            if drv.last_sent_current < 0.1 {
+                                status = 4;
+                            }
+                        } else if matches!(drv.current_mode, ChargingMode::Scheduled)
+                            && !crate::controls::ChargingControls::is_schedule_active(&drv.config)
+                        {
+                            status = 6;
+                        }
+                    }
+                    let prev_status = drv.last_status;
+                    let cur_status = status as u8;
+                    if cur_status == 2 && prev_status != 2 && drv.sessions.current_session.is_none()
+                    {
+                        let _ = drv.sessions.start_session(m.energy_kwh);
+                    } else if cur_status != 2
+                        && drv.sessions.current_session.is_some()
+                        && drv.sessions.end_session(m.energy_kwh).is_ok()
+                        && drv.config.pricing.source.to_lowercase() == "static"
+                        && let Some(ref last) = drv.sessions.last_session
+                    {
+                        let cost =
+                            last.energy_delivered_kwh * drv.config.pricing.static_rate_eur_per_kwh;
+                        drv.sessions.set_cost_on_last_session(cost);
+                    }
+                    drv.last_status = cur_status;
+
+                    // Control logic (no await while locked)
+                    let now_secs = (std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default())
+                    .as_secs_f64();
+                    let requested = drv.intended_set_current;
+                    let excess_pv_power_w: f32 = drv.last_excess_pv_power_w;
+                    let effective: f32 = drv
+                        .controls
+                        .blocking_compute_effective_current(
+                            drv.current_mode,
+                            drv.start_stop,
+                            requested,
+                            drv.station_max_current,
+                            now_secs,
+                            Some(excess_pv_power_w),
+                            &drv.config,
+                        )
+                        .unwrap_or(0.0);
+
+                    let need_watchdog = drv.last_current_set_time.elapsed().as_secs()
+                        >= drv.config.controls.watchdog_interval_seconds as u64;
+                    let need_change = (effective - drv.last_sent_current).abs()
+                        > drv.config.controls.update_difference_threshold;
+                    if need_watchdog || need_change {
+                        let _ = mb_tx_clone.send(ModbusCommand::WriteSetCurrent(effective));
+                        drv.last_sent_current = effective;
+                        drv.last_current_set_time = std::time::Instant::now();
+                    }
+
+                    // Update sessions and persistence (best-effort)
+                    let _ = drv.sessions.update(m.p_total, m.energy_kwh);
+                    let sessions_state = drv.sessions.get_state();
+                    let current_mode_u32 = drv.current_mode as u32;
+                    let start_stop_u32 = drv.start_stop as u32;
+                    let intended = drv.intended_set_current;
+                    // Drop mutable borrow before persistence calls
+                    drop(drv);
+                    {
+                        let mut drv2 = driver_for_task.lock().await;
+                        drv2.persistence.set_mode(current_mode_u32);
+                        drv2.persistence.set_start_stop(start_stop_u32);
+                        drv2.persistence.set_set_current(intended);
+                        let _ = drv2.persistence.set_section("session", sessions_state);
+                        let _ = drv2.persistence.save();
+                    }
+
+                    // Update metrics and publish snapshot
+                    {
+                        let mut drv3 = driver_for_task.lock().await;
+                        drv3.total_polls = drv3.total_polls.saturating_add(1);
+                        if m.overran {
+                            drv3.overrun_count = drv3.overrun_count.saturating_add(1);
+                        }
+                        let snapshot = Arc::new(drv3.build_typed_snapshot(Some(m.duration_ms)));
+                        let _ = drv3.status_snapshot_tx.send(snapshot);
+                    }
+                }
+            });
+        }
+
+        // Start D-Bus exporter task to mirror snapshots to D-Bus without blocking the driver loop
+        let exporter_handle = {
+            let driver_for_task = driver.clone();
+            tokio::spawn(async move {
+                // Obtain snapshot receiver once; it clones internally for borrows
+                let mut rx = {
+                    let drv = driver_for_task.lock().await;
+                    drv.subscribe_snapshot()
+                };
+                loop {
+                    // Clone the current Arc snapshot BEFORE any await to avoid holding a non-Send borrow
+                    let current_snapshot: Arc<DriverSnapshot> = rx.borrow().clone();
+                    {
+                        let mut drv = driver_for_task.lock().await;
+                        if let Some(dbus) = &mut drv.dbus {
+                            // Convert typed snapshot to serde_json::Value view for export mapping
+                            let value = serde_json::to_value(&*current_snapshot)
+                                .unwrap_or(serde_json::json!({}));
+                            let _ = dbus.export_snapshot(&value).await;
+                        }
+                    }
+                    if rx.changed().await.is_err() {
+                        // channel closed -> pause and retry obtaining a new receiver
+                        tokio::time::sleep(Duration::from_millis(250)).await;
+                        rx = {
+                            let drv = driver_for_task.lock().await;
+                            drv.subscribe_snapshot()
+                        };
+                    }
+                }
+            })
+        };
+
+        // PV reader task (dedicated single-thread runtime) to avoid Send bounds
+        let pv_handle = {
+            let driver_for_task = driver.clone();
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("pv runtime");
+                rt.block_on(async move {
+                    let mut ticker = interval(Duration::from_millis(1000));
+                    loop {
+                        let last_power = {
+                            let drv = driver_for_task.lock().await;
+                            drv.last_total_power
+                        };
+                        let excess_opt = {
+                            let drv = driver_for_task.lock().await;
+                            drv.calculate_excess_pv_power(last_power).await
+                        };
+                        if let Some(ex) = excess_opt {
+                            let mut drv2 = driver_for_task.lock().await;
+                            drv2.last_excess_pv_power_w = ex;
+                        }
+                        ticker.tick().await;
+                    }
+                });
+            })
+        };
+
+        // Wait for shutdown signal while workers run
+        loop {
+            let mut drv = driver.lock().await;
+            if drv.shutdown_rx.try_recv().is_ok() {
+                drv.logger.info("Shutdown signal received");
+                break;
+            }
+            drop(drv);
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+
+        // Shutdown sequence
+        {
+            let mut drv = driver.lock().await;
+            drv.state.send(DriverState::ShuttingDown).ok();
+            drv.shutdown().await?;
+        }
+
+        exporter_handle.abort();
+        // Stop PV thread
+        pv_handle.thread().unpark();
+
         Ok(())
     }
 }
@@ -882,6 +1586,10 @@ impl AlfenDriver {
         // After DBus is up, read and publish identity (ProductName, FirmwareVersion, Serial)
         let _ = self.refresh_charger_identity().await;
 
+        // Emit a snapshot after identity refresh so UI can show early values
+        let snapshot = Arc::new(self.build_typed_snapshot(None));
+        let _ = self.status_snapshot_tx.send(snapshot);
+
         Ok(())
     }
 }
@@ -949,5 +1657,12 @@ impl AlfenDriver {
         }
         self.persistence.set_set_current(self.intended_set_current);
         let _ = self.persistence.save();
+    }
+}
+
+impl AlfenDriver {
+    fn last_poll_duration_ms(&self) -> u64 {
+        // Placeholder: could store last duration explicitly; use 0 to indicate unknown
+        0
     }
 }

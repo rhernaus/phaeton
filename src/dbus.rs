@@ -789,6 +789,76 @@ impl DbusService {
         Ok(())
     }
 
+    /// Export a snapshot (subset) to D-Bus. Call from a dedicated exporter task.
+    pub async fn export_snapshot(&mut self, snapshot: &serde_json::Value) -> Result<()> {
+        let mut updates: Vec<(String, serde_json::Value)> = Vec::with_capacity(24);
+
+        let g = |k: &str| snapshot.get(k).cloned();
+        if let Some(v) = g("l1_voltage") {
+            updates.push(("/Ac/L1/Voltage".to_string(), v));
+        }
+        if let Some(v) = g("l2_voltage") {
+            updates.push(("/Ac/L2/Voltage".to_string(), v));
+        }
+        if let Some(v) = g("l3_voltage") {
+            updates.push(("/Ac/L3/Voltage".to_string(), v));
+        }
+        if let Some(v) = g("l1_current") {
+            updates.push(("/Ac/L1/Current".to_string(), v));
+        }
+        if let Some(v) = g("l2_current") {
+            updates.push(("/Ac/L2/Current".to_string(), v));
+        }
+        if let Some(v) = g("l3_current") {
+            updates.push(("/Ac/L3/Current".to_string(), v));
+        }
+        if let Some(v) = g("l1_power") {
+            updates.push(("/Ac/L1/Power".to_string(), v));
+        }
+        if let Some(v) = g("l2_power") {
+            updates.push(("/Ac/L2/Power".to_string(), v));
+        }
+        if let Some(v) = g("l3_power") {
+            updates.push(("/Ac/L3/Power".to_string(), v));
+        }
+        if let Some(v) = g("ac_power") {
+            updates.push(("/Ac/Power".to_string(), v));
+        }
+        if let Some(v) = g("status") {
+            updates.push(("/Status".to_string(), v));
+        }
+        if let Some(v) = g("station_max_current") {
+            updates.push(("/MaxCurrent".to_string(), v));
+        }
+        if let Some(session) = snapshot.get("session").and_then(|s| s.as_object())
+            && let Some(v) = session.get("energy_delivered_kwh").cloned()
+        {
+            updates.push(("/Ac/Energy/Forward".to_string(), v));
+        }
+        if let Some(v) = g("total_energy_kwh") {
+            updates.push(("/Ac/Energy/Total".to_string(), v));
+        }
+        if let Some(v) = g("ac_current") {
+            updates.push(("/Ac/Current".to_string(), v.clone()));
+            updates.push(("/Current".to_string(), v));
+        }
+        if let Some(v) = g("active_phases") {
+            updates.push(("/Ac/PhaseCount".to_string(), v));
+        }
+        if let Some(v) = g("set_current") {
+            updates.push(("/SetCurrent".to_string(), v));
+        }
+        if let Some(v) = g("charging_time_sec").or_else(|| {
+            snapshot
+                .get("session")
+                .and_then(|s| s.get("charging_time_sec"))
+                .cloned()
+        }) {
+            updates.push(("/ChargingTime".to_string(), v));
+        }
+        self.update_paths(updates).await
+    }
+
     /// Read last value (local cache)
     pub fn get(&self, path: &str) -> Option<serde_json::Value> {
         let shared = self.shared.lock().unwrap();

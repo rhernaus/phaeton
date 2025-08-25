@@ -1,6 +1,6 @@
 //! Axum-based HTTP server with OpenAPI (utoipa) and Swagger UI
 
-use crate::driver::AlfenDriver;
+use crate::driver::{AlfenDriver, DriverSnapshot};
 use axum::response::Redirect;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::{
@@ -13,9 +13,10 @@ use axum::{
 use serde::Deserialize;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use tokio::sync::Mutex;
-use tokio::time::{Duration, timeout};
+use tokio::sync::{Mutex, watch};
+// no timeouts needed in current web handlers
 use tokio_stream::StreamExt;
+use tokio_stream::wrappers::WatchStream;
 use tower_http::services::ServeDir;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use utoipa::{OpenApi, ToSchema};
@@ -24,6 +25,7 @@ use utoipa_swagger_ui::SwaggerUi;
 #[derive(Clone)]
 pub struct AppState {
     pub driver: Arc<Mutex<AlfenDriver>>,
+    pub snapshot_rx: watch::Receiver<Arc<DriverSnapshot>>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -48,138 +50,50 @@ async fn health() -> impl IntoResponse {
     (StatusCode::OK, "ok")
 }
 
+#[utoipa::path(get, path = "/api/metrics", responses(
+    (status = 200, description = "Driver metrics")
+))]
+async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
+    let snap = state.snapshot_rx.borrow().clone();
+    // Compute age_ms from timestamp
+    let age_ms = chrono::DateTime::parse_from_rfc3339(&snap.timestamp)
+        .ok()
+        .and_then(|ts| {
+            chrono::Utc::now()
+                .signed_duration_since(ts.with_timezone(&chrono::Utc))
+                .to_std()
+                .ok()
+        })
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let body = serde_json::json!({
+        "age_ms": age_ms,
+        "poll_duration_ms": snap.poll_duration_ms,
+        "total_polls": snap.total_polls,
+        "overrun_count": snap.overrun_count,
+        "poll_interval_ms": snap.poll_interval_ms,
+    });
+    Json(body)
+}
+
 #[utoipa::path(get, path = "/api/status", responses(
     (status = 200, description = "Driver status")
 ))]
 async fn status(State(state): State<AppState>) -> impl IntoResponse {
-    match timeout(Duration::from_millis(750), state.driver.lock()).await {
-        Ok(drv_guard) => {
-            let drv = drv_guard;
-            let mut root = serde_json::json!({
-                "mode": drv.current_mode_code(),
-                "start_stop": drv.start_stop_code(),
-                "set_current": drv.get_intended_set_current(),
-                "station_max_current": drv.get_station_max_current(),
-                "device_instance": drv.config().device_instance,
-            });
-
-            // Identity
-            if let Some(v) = drv.get_db_value("/ProductName") {
-                root["product_name"] = v;
-            }
-            if let Some(v) = drv.get_db_value("/Serial") {
-                root["serial"] = v;
-            }
-            if let Some(v) = drv.get_db_value("/FirmwareVersion") {
-                root["firmware"] = v;
-            }
-
-            // Status & phases
-            if let Some(v) = drv.get_db_value("/Status") {
-                root["status"] = v;
-            }
-            if let Some(v) = drv.get_db_value("/Ac/PhaseCount") {
-                root["active_phases"] = v;
-            }
-
-            // Power & currents
-            if let Some(v) = drv.get_db_value("/Ac/Power") {
-                root["ac_power"] = v;
-            }
-            if let Some(v) = drv.get_db_value("/Ac/Current") {
-                root["ac_current"] = v;
-            }
-            if let Some(v) = drv.get_db_value("/Ac/L1/Voltage") {
-                root["l1_voltage"] = v;
-            }
-            if let Some(v) = drv.get_db_value("/Ac/L2/Voltage") {
-                root["l2_voltage"] = v;
-            }
-            if let Some(v) = drv.get_db_value("/Ac/L3/Voltage") {
-                root["l3_voltage"] = v;
-            }
-            if let Some(v) = drv.get_db_value("/Ac/L1/Current") {
-                root["l1_current"] = v;
-            }
-            if let Some(v) = drv.get_db_value("/Ac/L2/Current") {
-                root["l2_current"] = v;
-            }
-            if let Some(v) = drv.get_db_value("/Ac/L3/Current") {
-                root["l3_current"] = v;
-            }
-            if let Some(v) = drv.get_db_value("/Ac/L1/Power") {
-                root["l1_power"] = v;
-            }
-            if let Some(v) = drv.get_db_value("/Ac/L2/Power") {
-                root["l2_power"] = v;
-            }
-            if let Some(v) = drv.get_db_value("/Ac/L3/Power") {
-                root["l3_power"] = v;
-            }
-
-            // Build session object
-            let mut session = serde_json::json!({});
-            if let Some(v) = drv.get_db_value("/ChargingTime") {
-                session["charging_time_sec"] = v;
-            }
-            if let Some(v) = drv.get_db_value("/Ac/Energy/Forward") {
-                session["energy_delivered_kwh"] = v;
-            }
-            let sessions_state = drv.sessions_snapshot();
-            if let Some(obj) = sessions_state.as_object() {
-                if let Some(cur) = obj.get("current_session").and_then(|v| v.as_object()) {
-                    if let Some(ts) = cur.get("start_time") {
-                        session["start_ts"] = ts.clone();
-                    }
-                    if let Some(v) = cur.get("energy_delivered_kwh") {
-                        session["energy_delivered_kwh"] = v.clone();
-                    }
-                }
-                if let Some(last) = obj.get("last_session").and_then(|v| v.as_object()) {
-                    if session.get("start_ts").is_none()
-                        && let Some(ts) = last.get("start_time")
-                    {
-                        session["start_ts"] = ts.clone();
-                    }
-                    if let Some(ts) = last.get("end_time") {
-                        session["end_ts"] = ts.clone();
-                    }
-                    if session.get("energy_delivered_kwh").is_none()
-                        && let Some(v) = last.get("energy_delivered_kwh")
-                    {
-                        session["energy_delivered_kwh"] = v.clone();
-                    }
-                    if let Some(v) = last.get("cost") {
-                        session["cost"] = v.clone();
-                    }
-                }
-            }
-
-            // Pricing hints from config
-            let pricing = &drv.config().pricing;
-            if !pricing.currency_symbol.is_empty() {
-                root["pricing_currency"] = serde_json::json!(pricing.currency_symbol.clone());
-            }
-            if pricing.source.to_lowercase() == "static" {
-                root["energy_rate"] = serde_json::json!(pricing.static_rate_eur_per_kwh);
-            }
-
-            if let Some(v) = drv.get_db_value("/Ac/Energy/Total") {
-                root["total_energy_kwh"] = v;
-            }
-
-            root["session"] = session;
-
-            Json(root).into_response()
-        }
-        Err(_) => (
+    // Lock-free path: try to read the latest snapshot, else return unavailable
+    let snapshot = state.snapshot_rx.borrow().clone();
+    // Always returns something; initial snapshot is minimal but valid
+    if true {
+        Json((*snapshot).clone()).into_response()
+    } else {
+        (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(serde_json::json!({
                 "error": "status_unavailable",
-                "reason": "driver_busy",
+                "reason": "no_snapshot",
             })),
         )
-            .into_response(),
+            .into_response()
     }
 }
 
@@ -397,15 +311,10 @@ async fn update_apply() -> impl IntoResponse {
 
 #[utoipa::path(get, path = "/api/events", responses((status = 200)))]
 async fn events(State(state): State<AppState>) -> impl IntoResponse {
-    let rx = {
-        let drv = state.driver.lock().await;
-        drv.subscribe_status()
-    };
-    let stream = tokio_stream::wrappers::BroadcastStream::new(rx).filter_map(|msg| match msg {
-        Ok(payload) => Some(Ok::<Event, std::convert::Infallible>(
-            Event::default().event("status").data(payload),
-        )),
-        Err(_) => None,
+    let rx = state.snapshot_rx.clone();
+    let stream = WatchStream::new(rx).map(|snapshot| {
+        let payload = serde_json::to_string(&*snapshot).unwrap_or("{}".to_string());
+        Ok::<Event, std::convert::Infallible>(Event::default().event("status").data(payload))
     });
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
@@ -417,7 +326,7 @@ async fn events(State(state): State<AppState>) -> impl IntoResponse {
         get_config, put_config, get_config_schema,
         logs_tail, logs_head, logs_download,
         sessions, dbus_dump, update_status, update_check, update_apply,
-        events,
+        events, metrics,
     ),
     components(schemas(ModeBody, StartStopBody, SetCurrentBody, TailParams)),
     tags((name = "phaeton", description = "Phaeton EV Charger API"))
@@ -430,6 +339,7 @@ pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/", get(|| async { Redirect::to("/ui/index.html") }))
         .route("/api/health", get(health))
+        .route("/api/metrics", get(metrics))
         .route("/api/status", get(status))
         .route("/api/mode", post(set_mode))
         .route("/api/startstop", post(set_startstop))
@@ -462,7 +372,14 @@ pub fn build_router(state: AppState) -> Router {
 }
 
 pub async fn serve(driver: Arc<Mutex<AlfenDriver>>, host: &str, port: u16) -> anyhow::Result<()> {
-    let state = AppState { driver };
+    let snapshot_rx = {
+        let drv = driver.lock().await;
+        drv.subscribe_snapshot()
+    };
+    let state = AppState {
+        driver,
+        snapshot_rx,
+    };
     let router = build_router(state);
 
     // Structured logs for web server startup and binding
