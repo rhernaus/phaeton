@@ -27,7 +27,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Lint (clippy)
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --all-targets --all-features -- -D warnings -W clippy::cognitive_complexity
 
       - name: Install llvm-tools and cargo-llvm-cov
         run: |
@@ -53,6 +53,19 @@ jobs:
           path: |
             lcov.info
             target/llvm-cov/html
+
+  budgets:
+    name: Budgets
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Verify budget script exists
+        run: test -f scripts/check-budgets.sh
+
+      - name: Run budget checks (default budgets)
+        run: bash scripts/check-budgets.sh
 
   audit:
     name: Security Audit
