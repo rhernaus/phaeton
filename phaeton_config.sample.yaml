@@ -70,6 +70,8 @@ controls:
   # readings. During this window after a set-current change we subtract
   # expected EV power from house consumption to avoid double counting (ms).
   ev_reporting_lag_ms: 2000
+  # EMA smoothing factor (0..1) for PV excess; 0=off, 0.2=strong smoothing
+  pv_excess_ema_alpha: 0.4
 
 web:
   host: "127.0.0.1"

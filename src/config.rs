@@ -261,6 +261,10 @@ pub struct ControlsConfig {
     /// last sent current) from house consumption instead of the charger-reported
     /// power to avoid double-counting.
     pub ev_reporting_lag_ms: u32,
+
+    /// Exponential moving average smoothing factor for PV excess (0..1)
+    /// Lower values increase smoothing; 0 disables and uses raw values.
+    pub pv_excess_ema_alpha: f32,
 }
 
 /// Web server configuration
@@ -373,6 +377,7 @@ impl Default for ControlsConfig {
             current_update_interval: 30000,
             verify_delay: 100,
             ev_reporting_lag_ms: 2000,
+            pv_excess_ema_alpha: 0.4,
         }
     }
 }

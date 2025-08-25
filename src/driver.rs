@@ -139,6 +139,12 @@ pub struct AlfenDriver {
     last_current_set_time: std::time::Instant,
     /// When we last changed the current setpoint (monotonic clock)
     last_set_current_monotonic: std::time::Instant,
+    /// Smoothed PV excess power (EMA) for stability
+    pv_excess_ema_w: f32,
+    /// Timestamp when PV excess was last clearly non-zero (for zero-grace)
+    last_nonzero_excess_at: std::time::Instant,
+    /// Deadline for minimum-charge grace timer when excess < 6A
+    min_charge_timer_deadline: Option<std::time::Instant>,
     /// Last observed Victron-esque status (0=Disc,1=Conn,2=Charging)
     last_status: u8,
 
@@ -298,6 +304,9 @@ impl AlfenDriver {
             last_current_set_time: std::time::Instant::now(),
             last_set_current_monotonic: std::time::Instant::now(),
             last_status: 0,
+            pv_excess_ema_w: 0.0,
+            last_nonzero_excess_at: std::time::Instant::now(),
+            min_charge_timer_deadline: None,
             commands_rx,
             commands_tx,
             status_tx,
@@ -617,8 +626,12 @@ impl AlfenDriver {
                 .await
                 .unwrap_or(0.0);
 
-            let need_watchdog = self.last_current_set_time.elapsed().as_secs()
-                >= self.config.controls.watchdog_interval_seconds as u64;
+            // Enforce updating at least every current_update_interval ms
+            let watchdog_satisfied = self.last_current_set_time.elapsed().as_millis()
+                >= self.config.controls.current_update_interval as u128;
+            let need_watchdog = watchdog_satisfied
+                || self.last_current_set_time.elapsed().as_secs()
+                    >= self.config.controls.watchdog_interval_seconds as u64;
             let need_change = (effective - self.last_sent_current).abs()
                 > self.config.controls.update_difference_threshold;
             if need_watchdog || need_change {
@@ -1423,7 +1436,9 @@ impl AlfenDriver {
                     let requested = drv.intended_set_current;
                     // Use PV reader's last computed value (it applies lag compensation)
                     let excess_pv_power_w: f32 = drv.last_excess_pv_power_w;
-                    let effective: f32 = drv
+                    // Implement minimum-charge grace: if Auto and pv excess converts < 6A,
+                    // hold 6A for a configurable time before dropping to 0.
+                    let mut effective: f32 = drv
                         .controls
                         .blocking_compute_effective_current(
                             drv.current_mode,
@@ -1436,8 +1451,51 @@ impl AlfenDriver {
                         )
                         .unwrap_or(0.0);
 
-                    let need_watchdog = drv.last_current_set_time.elapsed().as_secs()
-                        >= drv.config.controls.watchdog_interval_seconds as u64;
+                    if matches!(drv.current_mode, ChargingMode::Auto)
+                        && matches!(drv.start_stop, StartStopState::Enabled)
+                    {
+                        // Convert 6A threshold to watts with same assumptions (3x230V)
+                        let six_a_watts = 6.0f32 * 230.0f32 * 3.0f32;
+                        let have_min = excess_pv_power_w >= six_a_watts - 200.0; // small tolerance
+                        let now = std::time::Instant::now();
+
+                        if have_min {
+                            // Enough PV: clear timer and compute normally
+                            drv.min_charge_timer_deadline = None;
+                        } else {
+                            // Not enough PV: start or maintain timer
+                            let duration = std::time::Duration::from_secs(
+                                drv.config.controls.min_charge_duration_seconds as u64,
+                            );
+                            if drv.min_charge_timer_deadline.is_none() {
+                                drv.min_charge_timer_deadline = Some(now + duration);
+                                drv.logger
+                                    .info("PV below 6A; starting minimum-charge countdown");
+                            }
+                        }
+
+                        // While timer active, clamp effective to 6A (not below)
+                        if let Some(deadline) = drv.min_charge_timer_deadline {
+                            if deadline > std::time::Instant::now() {
+                                if effective < 6.0 {
+                                    effective = 6.0;
+                                }
+                            } else {
+                                // Timer expired → stop charging (set to 0 A)
+                                effective = 0.0;
+                                drv.min_charge_timer_deadline = None;
+                                drv.logger
+                                    .info("Minimum-charge countdown expired; stopping charging");
+                            }
+                        }
+                    }
+
+                    // Enforce updating at least every current_update_interval ms to keep charger from fallback
+                    let watchdog_satisfied = drv.last_current_set_time.elapsed().as_millis()
+                        >= drv.config.controls.current_update_interval as u128;
+                    let need_watchdog = watchdog_satisfied
+                        || drv.last_current_set_time.elapsed().as_secs()
+                            >= drv.config.controls.watchdog_interval_seconds as u64;
                     let need_change = (effective - drv.last_sent_current).abs()
                         > drv.config.controls.update_difference_threshold;
                     if need_watchdog || need_change {
@@ -1555,7 +1613,21 @@ impl AlfenDriver {
                                 let excess_opt = driver_for_task.lock().await.calculate_excess_pv_power(ev_power_for_subtract).await;
                                 if let Some(ex) = excess_opt {
                                     let mut drv = driver_for_task.lock().await;
-                                    drv.last_excess_pv_power_w = ex;
+                                    // Apply EMA smoothing
+                                    let alpha = drv.config.controls.pv_excess_ema_alpha.clamp(0.0, 1.0);
+                                    if alpha > 0.0 {
+                                        let prev = drv.pv_excess_ema_w;
+                                        let ema = alpha * ex + (1.0 - alpha) * prev;
+                                        drv.pv_excess_ema_w = ema;
+                                        drv.last_excess_pv_power_w = ema;
+                                    } else {
+                                        drv.pv_excess_ema_w = ex;
+                                        drv.last_excess_pv_power_w = ex;
+                                    }
+                                    // Track last non-zero excess time
+                                    if drv.last_excess_pv_power_w > 50.0 {
+                                        drv.last_nonzero_excess_at = std::time::Instant::now();
+                                    }
                                     if should_log_debug {
                                         drv.logger.debug(&format!("Lag compensation active: ev_power_for_subtract={:.0}W, last_sent_current={:.2}A", ev_power_for_subtract, drv.last_sent_current));
                                     }
@@ -1710,11 +1782,18 @@ impl AlfenDriver {
 // Control callbacks for Mode/StartStop/SetCurrent updates (stub: call these from web API later)
 impl AlfenDriver {
     pub async fn set_mode(&mut self, mode: u8) {
-        self.current_mode = match mode {
+        let new_mode = match mode {
             1 => ChargingMode::Auto,
             2 => ChargingMode::Scheduled,
             _ => ChargingMode::Manual,
         };
+        if new_mode as u8 != self.current_mode as u8 {
+            self.logger.info(&format!(
+                "Mode changed: {} -> {}",
+                self.current_mode as u8, new_mode as u8
+            ));
+        }
+        self.current_mode = new_mode;
         if let Some(dbus) = &mut self.dbus {
             let _ = dbus.update_path("/Mode", serde_json::json!(mode)).await;
         }
@@ -1728,6 +1807,13 @@ impl AlfenDriver {
         } else {
             StartStopState::Stopped
         };
+        self.logger.info(&format!(
+            "StartStop changed: {}",
+            match self.start_stop {
+                StartStopState::Enabled => "enabled",
+                StartStopState::Stopped => "stopped",
+            }
+        ));
         if let Some(dbus) = &mut self.dbus {
             // Export StartStop as boolean for VRM compatibility
             let _ = dbus

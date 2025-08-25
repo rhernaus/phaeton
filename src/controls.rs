@@ -71,7 +71,7 @@ impl ChargingControls {
         let effective = match mode {
             ChargingMode::Manual => requested_current.min(station_max_current),
             ChargingMode::Auto => {
-                // Interpret solar_power as excess Watts available for charging.
+                // Interpret solar_power as (smoothed) excess Watts available for charging.
                 // Convert Watts to Amps using nominal 230V per phase and assume 3 phases.
                 let excess_watts = solar_power.unwrap_or(0.0).max(0.0);
                 let nominal_voltage = 230.0f32;
