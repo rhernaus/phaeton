@@ -21,7 +21,7 @@ tokio-modbus = { version = "0.16.1", features = ["tcp"] }
 
 # Web framework - using warp for now as it's more stable
 axum = { version = "0.8", features = ["macros", "json", "http2", "tokio"] }
-tower = "0.4"
+tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace", "fs", "compression-br", "compression-gzip"] }
 
 # Serialization
