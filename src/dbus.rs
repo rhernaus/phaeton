@@ -1117,24 +1117,13 @@ impl BusItem {
                 let _ = shared.commands_tx.send(DriverCommand::SetMode(m));
             }
             "/StartStop" => {
-                // Accept both boolean and numeric writes (VRM/Cerbo)
-                let v = match sv {
-                    serde_json::Value::Bool(b) => {
-                        if b {
-                            1
-                        } else {
-                            0
-                        }
-                    }
-                    serde_json::Value::Number(ref n) => {
-                        if n.as_u64().unwrap_or(0) > 0 || n.as_i64().unwrap_or(0) > 0 {
-                            1
-                        } else {
-                            0
-                        }
-                    }
-                    _ => 0,
-                };
+                // Use the already-normalized value (0/1) to avoid mismatches between cache/signals and driver command
+                let v: u8 = normalized_json
+                    .as_u64()
+                    .map(|u| if u > 0 { 1 } else { 0 })
+                    .or_else(|| normalized_json.as_i64().map(|i| if i > 0 { 1 } else { 0 }))
+                    .or_else(|| normalized_json.as_bool().map(|b| if b { 1 } else { 0 }))
+                    .unwrap_or(0);
                 let _ = shared.commands_tx.send(DriverCommand::SetStartStop(v));
             }
             "/SetCurrent" => {
