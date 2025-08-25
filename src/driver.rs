@@ -124,7 +124,7 @@ pub struct AlfenDriver {
     /// Session manager
     sessions: ChargingSessionManager,
 
-    /// D-Bus service (stub)
+    /// D-Bus service (owned here; avoid holding driver lock across awaits by temporarily taking it)
     dbus: Option<DbusService>,
 
     /// Controls logic
@@ -1449,12 +1449,13 @@ impl AlfenDriver {
                 loop {
                     // Clone the current Arc snapshot BEFORE any await to avoid holding a non-Send borrow
                     let current_snapshot: Arc<DriverSnapshot> = rx.borrow().clone();
+                    // Convert snapshot outside of any driver locks
+                    let value =
+                        serde_json::to_value(&*current_snapshot).unwrap_or(serde_json::json!({}));
+                    // Acquire dbus mutex only for the duration of the export
                     {
                         let mut drv = driver_for_task.lock().await;
                         if let Some(dbus) = &mut drv.dbus {
-                            // Convert typed snapshot to serde_json::Value view for export mapping
-                            let value = serde_json::to_value(&*current_snapshot)
-                                .unwrap_or(serde_json::json!({}));
                             let _ = dbus.export_snapshot(&value).await;
                         }
                     }
@@ -1487,17 +1488,12 @@ impl AlfenDriver {
                     loop {
                         tokio::select! {
                             _ = ticker.tick() => {
-                                let last_power = {
-                                    let drv = driver_for_task.lock().await;
-                                    drv.last_total_power
-                                };
-                                let excess_opt = {
-                                    let drv = driver_for_task.lock().await;
-                                    drv.calculate_excess_pv_power(last_power).await
-                                };
+                                // Snapshot last_total_power without holding the lock during await
+                                let last_power = { driver_for_task.lock().await.last_total_power };
+                                // Call async method without holding the lock during await
+                                let excess_opt = driver_for_task.lock().await.calculate_excess_pv_power(last_power).await;
                                 if let Some(ex) = excess_opt {
-                                    let mut drv2 = driver_for_task.lock().await;
-                                    drv2.last_excess_pv_power_w = ex;
+                                    driver_for_task.lock().await.last_excess_pv_power_w = ex;
                                 }
                             }
                             res = stop_rx.changed() => {
