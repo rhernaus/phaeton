@@ -137,6 +137,8 @@ pub struct AlfenDriver {
     station_max_current: f32,
     last_sent_current: f32,
     last_current_set_time: std::time::Instant,
+    /// When we last changed the current setpoint (monotonic clock)
+    last_set_current_monotonic: std::time::Instant,
     /// Last observed Victron-esque status (0=Disc,1=Conn,2=Charging)
     last_status: u8,
 
@@ -294,6 +296,7 @@ impl AlfenDriver {
             station_max_current: 32.0,
             last_sent_current: 0.0,
             last_current_set_time: std::time::Instant::now(),
+            last_set_current_monotonic: std::time::Instant::now(),
             last_status: 0,
             commands_rx,
             commands_tx,
@@ -583,8 +586,23 @@ impl AlfenDriver {
             let requested = self.intended_set_current;
 
             // Calculate PV excess power from Victron system (AC+DC PV minus AC loads excluding EV charger itself)
-            let excess_pv_power_w: f32 =
-                self.calculate_excess_pv_power(p_total).await.unwrap_or(0.0);
+            // Compensate for Victron vs charger measurement lag right after a set-current change
+            // by estimating EV power from the last sent current for a brief window.
+            let ev_power_for_subtract = {
+                let lag_ms = self.config.controls.ev_reporting_lag_ms as u128;
+                if self.last_set_current_monotonic.elapsed().as_millis() < lag_ms {
+                    // Estimate: P = I_phase_max * V_phase * phases (use max of phase currents if available later)
+                    // We only have the commanded current; assume 3 phases and 230V nominal.
+                    let phases = 3.0f64; // TODO: detect
+                    (self.last_sent_current as f64 * 230.0f64 * phases).max(0.0)
+                } else {
+                    p_total
+                }
+            };
+            let excess_pv_power_w: f32 = self
+                .calculate_excess_pv_power(ev_power_for_subtract)
+                .await
+                .unwrap_or(0.0);
             let effective: f32 = self
                 .controls
                 .compute_effective_current(
@@ -604,6 +622,17 @@ impl AlfenDriver {
             let need_change = (effective - self.last_sent_current).abs()
                 > self.config.controls.update_difference_threshold;
             if need_watchdog || need_change {
+                if need_change {
+                    let reason = match self.current_mode {
+                        ChargingMode::Manual => "manual",
+                        ChargingMode::Auto => "pv_auto",
+                        ChargingMode::Scheduled => "scheduled",
+                    };
+                    self.logger.info(&format!(
+                        "Adjusting available current: {:.2} A -> {:.2} A (reason={}, pv_excess={:.0} W, station_max={:.1} A)",
+                        self.last_sent_current, effective, reason, excess_pv_power_w, self.station_max_current
+                    ));
+                }
                 let regs = crate::modbus::encode_32bit_float(effective);
                 // Borrow modbus manager only for the write
                 let write_res = self
@@ -622,6 +651,7 @@ impl AlfenDriver {
                 if write_res.is_ok() {
                     self.last_sent_current = effective;
                     self.last_current_set_time = std::time::Instant::now();
+                    self.last_set_current_monotonic = std::time::Instant::now();
                 } else {
                     self.logger.warn("Failed to write set current via Modbus");
                 }
@@ -677,8 +707,9 @@ impl AlfenDriver {
 
             // Log a concise summary
             self.logger.debug(&format!(
-                "V=({:.1},{:.1},{:.1})V I=({:.2},{:.2},{:.2})A P=({:.0},{:.0},{:.0})W total={:.0}W E={:.3}kWh status={}",
-                l1_v, l2_v, l3_v, l1_i, l2_i, l3_i, l1_p, l2_p, l3_p, p_total, energy_kwh, status
+                "V=({:.1},{:.1},{:.1})V I=({:.2},{:.2},{:.2})A P=({:.0},{:.0},{:.0})W total={:.0}W E={:.3}kWh status={} lag_ms={} last_sent_A={:.2}",
+                l1_v, l2_v, l3_v, l1_i, l2_i, l3_i, l1_p, l2_p, l3_p, p_total, energy_kwh, status,
+                self.last_set_current_monotonic.elapsed().as_millis(), self.last_sent_current
             ));
 
             // Publish status snapshot for SSE consumers
@@ -1390,6 +1421,7 @@ impl AlfenDriver {
                         .unwrap_or_default())
                     .as_secs_f64();
                     let requested = drv.intended_set_current;
+                    // Use PV reader's last computed value (it applies lag compensation)
                     let excess_pv_power_w: f32 = drv.last_excess_pv_power_w;
                     let effective: f32 = drv
                         .controls
@@ -1409,9 +1441,21 @@ impl AlfenDriver {
                     let need_change = (effective - drv.last_sent_current).abs()
                         > drv.config.controls.update_difference_threshold;
                     if need_watchdog || need_change {
+                        if need_change {
+                            let reason = match drv.current_mode {
+                                ChargingMode::Manual => "manual",
+                                ChargingMode::Auto => "pv_auto",
+                                ChargingMode::Scheduled => "scheduled",
+                            };
+                            drv.logger.info(&format!(
+                                "Adjusting available current: {:.2} A -> {:.2} A (reason={}, pv_excess={:.0} W, station_max={:.1} A)",
+                                drv.last_sent_current, effective, reason, excess_pv_power_w, drv.station_max_current
+                            ));
+                        }
                         let _ = mb_tx_clone.send(ModbusCommand::WriteSetCurrent(effective));
                         drv.last_sent_current = effective;
                         drv.last_current_set_time = std::time::Instant::now();
+                        drv.last_set_current_monotonic = std::time::Instant::now();
                     }
 
                     // Update sessions and persistence (best-effort)
@@ -1496,12 +1540,25 @@ impl AlfenDriver {
                     loop {
                         tokio::select! {
                             _ = ticker.tick() => {
-                                // Snapshot last_total_power without holding the lock during await
-                                let last_power = { driver_for_task.lock().await.last_total_power };
+                                // Snapshot fields needed for lag compensation without long locks
+                                let (ev_power_for_subtract, should_log_debug) = {
+                                    let drv = driver_for_task.lock().await;
+                                    let lag_ms = drv.config.controls.ev_reporting_lag_ms as u128;
+                                    let within_lag = drv.last_set_current_monotonic.elapsed().as_millis() < lag_ms;
+                                    let ev_est = if within_lag {
+                                        let phases = 3.0f64; // TODO: detect phases
+                                        (drv.last_sent_current as f64 * 230.0f64 * phases).max(0.0)
+                                    } else { drv.last_total_power };
+                                    (ev_est, within_lag)
+                                };
                                 // Call async method without holding the lock during await
-                                let excess_opt = driver_for_task.lock().await.calculate_excess_pv_power(last_power).await;
+                                let excess_opt = driver_for_task.lock().await.calculate_excess_pv_power(ev_power_for_subtract).await;
                                 if let Some(ex) = excess_opt {
-                                    driver_for_task.lock().await.last_excess_pv_power_w = ex;
+                                    let mut drv = driver_for_task.lock().await;
+                                    drv.last_excess_pv_power_w = ex;
+                                    if should_log_debug {
+                                        drv.logger.debug(&format!("Lag compensation active: ev_power_for_subtract={:.0}W, last_sent_current={:.2}A", ev_power_for_subtract, drv.last_sent_current));
+                                    }
                                 }
                             }
                             res = stop_rx.changed() => {
@@ -1691,6 +1748,8 @@ impl AlfenDriver {
         }
         self.persistence.set_set_current(self.intended_set_current);
         let _ = self.persistence.save();
+        // Record the moment we changed the intended current to enable lag compensation
+        self.last_set_current_monotonic = std::time::Instant::now();
     }
 }
 

@@ -254,6 +254,13 @@ pub struct ControlsConfig {
 
     /// Verification delay in milliseconds
     pub verify_delay: u32,
+
+    /// Time window to compensate measurement lag between Victron house loads
+    /// and charger Modbus readings (milliseconds). During this window after a
+    /// set-current change we subtract the expected EV power (derived from the
+    /// last sent current) from house consumption instead of the charger-reported
+    /// power to avoid double-counting.
+    pub ev_reporting_lag_ms: u32,
 }
 
 /// Web server configuration
@@ -365,6 +372,7 @@ impl Default for ControlsConfig {
             min_charge_duration_seconds: 300,
             current_update_interval: 30000,
             verify_delay: 100,
+            ev_reporting_lag_ms: 2000,
         }
     }
 }

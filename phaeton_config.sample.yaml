@@ -66,6 +66,10 @@ controls:
   min_charge_duration_seconds: 300
   current_update_interval: 30000
   verify_delay: 100
+  # Compensate measurement lag between Victron house loads and charger Modbus
+  # readings. During this window after a set-current change we subtract
+  # expected EV power from house consumption to avoid double counting (ms).
+  ev_reporting_lag_ms: 2000
 
 web:
   host: "127.0.0.1"
