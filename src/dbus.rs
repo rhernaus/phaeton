@@ -928,11 +928,19 @@ impl BusItem {
         // Map writable items to driver commands
         match self.path.as_str() {
             "/Mode" => {
-                let m = sv.as_u64().unwrap_or(0) as u8;
+                let m = sv
+                    .as_u64()
+                    .map(|v| v as u8)
+                    .or_else(|| sv.as_i64().map(|v| v as u8))
+                    .unwrap_or(0);
                 let _ = shared.commands_tx.send(DriverCommand::SetMode(m));
             }
             "/StartStop" => {
-                let v = sv.as_u64().unwrap_or(0) as u8;
+                let v = sv
+                    .as_u64()
+                    .map(|x| x as u8)
+                    .or_else(|| sv.as_i64().map(|x| x as u8))
+                    .unwrap_or(0);
                 let _ = shared.commands_tx.send(DriverCommand::SetStartStop(v));
             }
             "/SetCurrent" => {
