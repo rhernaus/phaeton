@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tokio::time::{Duration, timeout};
-use zbus::object_server::{InterfaceRef, SignalContext};
+use zbus::object_server::{InterfaceRef, SignalEmitter};
 use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 use zbus::{Connection, Proxy, Result as ZbusResult, names::WellKnownName};
 
@@ -278,7 +278,7 @@ impl RootBus {
 
     #[zbus(signal)]
     async fn items_changed(
-        ctxt: &SignalContext<'_>,
+        ctxt: &SignalEmitter<'_>,
         changes: std::collections::HashMap<&str, std::collections::HashMap<&str, OwnedValue>>,
     ) -> zbus::Result<()>;
 }
@@ -742,13 +742,13 @@ impl DbusService {
             }
             // Emit change signals so listeners (VeDbusItemImport) update immediately
             // 1) Per-path PropertiesChanged on the BusItem
-            let item_ctx = SignalContext::new(
+            let item_ctx = SignalEmitter::new(
                 conn,
                 OwnedObjectPath::try_from(path).map_err(|e| {
                     PhaetonError::dbus(format!("Invalid object path '{}': {}", path, e))
                 })?,
             )
-            .map_err(|e| PhaetonError::dbus(format!("SignalContext new failed: {}", e)))?;
+            .map_err(|e| PhaetonError::dbus(format!("SignalEmitter new failed: {}", e)))?;
             let mut changes: std::collections::HashMap<&str, OwnedValue> =
                 std::collections::HashMap::new();
             changes.insert("Value", BusItem::serde_to_owned_value(&value));
@@ -759,8 +759,8 @@ impl DbusService {
             let _ = BusItem::properties_changed(&item_ctx, changes).await;
 
             // 2) Root ItemsChanged summarizing the changed path
-            let root_ctx = SignalContext::new(conn, self.charger_path.clone())
-                .map_err(|e| PhaetonError::dbus(format!("Root SignalContext failed: {}", e)))?;
+            let root_ctx = SignalEmitter::new(conn, self.charger_path.clone())
+                .map_err(|e| PhaetonError::dbus(format!("Root SignalEmitter failed: {}", e)))?;
             let mut inner: std::collections::HashMap<&str, OwnedValue> =
                 std::collections::HashMap::new();
             inner.insert("Value", BusItem::serde_to_owned_value(&value));
@@ -991,7 +991,7 @@ impl BusItem {
 
     #[zbus(signal)]
     async fn properties_changed(
-        ctxt: &SignalContext<'_>,
+        ctxt: &SignalEmitter<'_>,
         changes: std::collections::HashMap<&str, OwnedValue>,
     ) -> zbus::Result<()>;
 }

@@ -1,0 +1,67 @@
+name: Package Phaeton tarball (binary + sample config + webui)
+description: Creates tar.gz artifact containing phaeton binary, sample config, and webui dir
+inputs:
+  target:
+    description: Target triple (e.g., armv7-unknown-linux-gnueabihf)
+    required: true
+  tag:
+    description: Version/tag to embed in tarball name (e.g., v0.5.1 or nightly)
+    required: true
+  binary_path:
+    description: Path to the compiled phaeton binary for this target
+    required: true
+  config_path:
+    description: Path to phaeton_config.sample.yaml in the repository
+    required: true
+  webui_dir:
+    description: Path to the webui directory in the repository
+    required: true
+  dest_dir:
+    description: Destination directory to place the resulting tarball
+    required: false
+    default: dist
+outputs:
+  tarball_path:
+    description: Path to the generated tarball
+    value: ${{ steps.package.outputs.tarball_path }}
+runs:
+  using: composite
+  steps:
+    - id: package
+      shell: bash
+      run: |
+        set -euo pipefail
+        TARGET="${{ inputs.target }}"
+        TAG="${{ inputs.tag }}"
+        BIN_PATH="${{ inputs.binary_path }}"
+        CONFIG_PATH="${{ inputs.config_path }}"
+        WEBUI_DIR="${{ inputs.webui_dir }}"
+        DEST_DIR="${{ inputs.dest_dir }}"
+
+        if [ ! -f "$BIN_PATH" ]; then
+          echo "Binary not found at $BIN_PATH" >&2
+          exit 1
+        fi
+        if [ ! -f "$CONFIG_PATH" ]; then
+          echo "Config not found at $CONFIG_PATH" >&2
+          exit 1
+        fi
+        if [ ! -d "$WEBUI_DIR" ]; then
+          echo "webui directory not found at $WEBUI_DIR" >&2
+          exit 1
+        fi
+
+        mkdir -p "$DEST_DIR"
+        STAGE_DIR="pkg/$TARGET"
+        rm -rf "$STAGE_DIR"
+        mkdir -p "$STAGE_DIR"
+
+        cp "$BIN_PATH" "$STAGE_DIR/phaeton"
+        chmod +x "$STAGE_DIR/phaeton"
+        cp "$CONFIG_PATH" "$STAGE_DIR/"
+        cp -a "$WEBUI_DIR" "$STAGE_DIR/"
+
+        TARBALL_NAME="phaeton-${TAG}-${TARGET}.tar.gz"
+        tar -czf "$DEST_DIR/$TARBALL_NAME" -C "$STAGE_DIR" .
+        echo "tarball_path=$DEST_DIR/$TARBALL_NAME" >> "$GITHUB_OUTPUT"
+

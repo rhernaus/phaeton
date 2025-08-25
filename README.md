@@ -28,7 +28,13 @@ A high-performance EV charger driver for Victron Venus OS, providing seamless in
 ### Download prebuilt binaries (recommended)
 
 Grab the latest binaries from [Releases](https://github.com/rhernaus/phaeton/releases).
-Artifacts are named with the GitHub release tag:
+Artifacts are named with the GitHub release tag and each tarball contains:
+
+- `phaeton` (binary)
+- `phaeton_config.sample.yaml`
+- `webui/` (static web assets served at `/ui`)
+
+Available targets:
 
 - **Cerbo GX (ARMv7)**: `phaeton-<tag>-armv7-unknown-linux-gnueabihf.tar.gz`
 - **Linux ARM64**: `phaeton-<tag>-aarch64-unknown-linux-gnu.tar.gz`
@@ -55,12 +61,17 @@ Install:
 
 ```bash
 tar -xzf phaeton-<tag>-<artifact>.tar.gz
+cd phaeton-<tag>-<artifact>
 sudo install -m 0755 phaeton /usr/local/bin/phaeton
+sudo mkdir -p /usr/local/share/phaeton
+sudo cp -a webui /usr/local/share/phaeton/
+cp phaeton_config.sample.yaml phaeton_config.yaml
 ```
 
 Run:
 
 ```bash
+# Ensure working directory contains config or place config at /data or /etc/phaeton
 phaeton
 ```
 
