@@ -10,18 +10,30 @@ A high-performance EV charger driver for Victron Venus OS, providing seamless in
 - **Memory Safe**: Rust's ownership system prevents common bugs
 - **Modbus TCP**: Async client with reconnect/backoff and decoding utilities
 - **Web Interface**: Axum REST API, SSE events, logs endpoints; static UI served under `/ui` and `/app`; OpenAPI at `/openapi.json` and Swagger UI at `/docs`
-- **D-Bus Integration (partial)**: Service registration and `com.victronenergy.BusItem` exposure for core paths; writable controls map to driver commands
+- **D‑Bus Integration (core)**:
+  - Service name `com.victronenergy.evcharger.phaeton_<instance>`
+  - `com.victronenergy.BusItem` exposure for core paths (`/Mode`, `/StartStop`, `/SetCurrent`, `/Status`, power/energy/current/voltages)
+  - Immediate per‑path `PropertiesChanged` and root `ItemsChanged` signals on updates
+  - Canonical normalization for writes:
+    - `/StartStop`: accepts bool/number/string → 0/1
+    - `/Mode`: accepts number/bool/string → 0=Manual, 1=Auto, 2=Scheduled
+  - Concurrency‑safe shared D‑Bus handle across exporter and PV reader (no races)
 - **Sessions & Persistence**: Session tracking, stats, and persistence across restarts; optional static pricing for session cost
+- **Controls**:
+  - Manual, Auto (PV‑aware), and Scheduled modes
+  - Auto‑mode grace only after already charging (dips clamp to 6A temporarily; initial Auto waits for sun)
+  - Per‑phase power fallback (V×I) when charger reports 0
 - **Configuration**: YAML configuration with validation; schema exposed at `/api/config/schema`
-- **Logging**: Structured logging with rotation; context-rich tracing
+- **Logging**: Structured logging with rotation; human‑readable names in `/Status` and mode change logs
 
 ### Planned / In progress
 
 - **Dynamic Pricing (Tibber)**: API client and pricing strategies
 - **Vehicle Integration**: Tesla and Kia clients
 - **Self-Updates**: Git-based update check/apply
-- **D-Bus**: Export full object tree and broader Venus OS parity
+- **D‑Bus**: Export full object tree (org.freedesktop.DBus.Properties) for complete Venus OS parity
 - **Security**: Authentication/authorization and rate limiting for the web API
+- **Metrics**: Prometheus exporter
 
 ## Quick Start
 
@@ -274,8 +286,9 @@ The application follows a modular architecture with clear separation of concerns
 ### Known limitations
 
 - Tibber, vehicle integrations, and updater are stubbed (not yet implemented).
-- D-Bus export is functional for core paths but not yet complete for all Venus OS paths.
+- D‑Bus export covers core paths; full Venus OS tree still pending.
 - API is unauthenticated; do not expose directly to untrusted networks.
+- Auto‑mode thresholds are heuristic; configuration knobs exist, but further tuning is planned.
 
 ## Configuration
 
