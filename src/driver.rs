@@ -1202,11 +1202,14 @@ impl AlfenDriver {
         // Channels for worker coordination
         let (meas_tx, mut meas_rx) = mpsc::unbounded_channel::<Measurements>();
         let (mb_tx, mb_rx) = mpsc::unbounded_channel::<ModbusCommand>();
+        // Stop signal for Modbus worker
+        let (mb_stop_tx, mb_stop_rx) = watch::channel(false);
 
         // Spawn Modbus worker on a dedicated single-thread Tokio runtime
-        {
+        let modbus_handle = {
             let driver_for_task = driver.clone();
             let meas_tx_clone = meas_tx.clone();
+            let mb_stop_rx = mb_stop_rx;
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
@@ -1224,6 +1227,7 @@ impl AlfenDriver {
                     );
                     let mut ticker = interval(Duration::from_millis(poll_ms));
                     let mut cmd_rx = mb_rx;
+                    let mut stop_rx = mb_stop_rx;
                     loop {
                         tokio::select! {
                             _ = ticker.tick() => {
@@ -1291,9 +1295,9 @@ impl AlfenDriver {
                                 let overran = dur_ms > cfg.poll_interval_ms;
                                 let _ = meas_tx_clone.send(Measurements { l1_v, l2_v, l3_v, l1_i, l2_i, l3_i, l1_p, l2_p, l3_p, p_total, energy_kwh, status_base, duration_ms: dur_ms, overran });
                             }
-                            Some(cmd) = cmd_rx.recv() => {
+                            cmd = cmd_rx.recv() => {
                                 match cmd {
-                                    ModbusCommand::WriteSetCurrent(effective) => {
+                                    Some(ModbusCommand::WriteSetCurrent(effective)) => {
                                         let regs = crate::modbus::encode_32bit_float(effective);
                                         let v0 = regs[0];
                                         let v1 = regs[1];
@@ -1306,13 +1310,17 @@ impl AlfenDriver {
                                             })
                                         }).await;
                                     }
+                                    None => break,
                                 }
+                            }
+                            _ = stop_rx.changed() => {
+                                break;
                             }
                         }
                     }
                 });
-            });
-        }
+            })
+        };
 
         // Control task: consumes measurements, applies logic, updates state and snapshot, sends set current
         {
@@ -1529,6 +1537,12 @@ impl AlfenDriver {
         let _ = pv_stop_tx.send(true);
         let _ = tokio::task::spawn_blocking(move || {
             let _ = pv_handle.join();
+        })
+        .await;
+        // Signal and join Modbus worker
+        let _ = mb_stop_tx.send(true);
+        let _ = tokio::task::spawn_blocking(move || {
+            let _ = modbus_handle.join();
         })
         .await;
 
