@@ -1003,8 +1003,30 @@ impl BusItem {
         }
 
         let sv = Self::owned_value_to_serde(&value);
-        // Update cache
-        shared.paths.insert(self.path.clone(), sv.clone());
+        // Update cache with normalization for certain paths
+        if self.path == "/StartStop" {
+            // Normalize to 0/1 integer for compatibility with Venus OS/VRM expectations
+            let v = match sv {
+                serde_json::Value::Bool(b) => {
+                    if b {
+                        1
+                    } else {
+                        0
+                    }
+                }
+                serde_json::Value::Number(ref n) => {
+                    if n.as_u64().unwrap_or(0) > 0 || n.as_i64().unwrap_or(0) > 0 {
+                        1
+                    } else {
+                        0
+                    }
+                }
+                _ => 0,
+            };
+            shared.paths.insert(self.path.clone(), serde_json::json!(v));
+        } else {
+            shared.paths.insert(self.path.clone(), sv.clone());
+        }
 
         // Map writable items to driver commands
         match self.path.as_str() {
@@ -1017,9 +1039,24 @@ impl BusItem {
                 let _ = shared.commands_tx.send(DriverCommand::SetMode(m));
             }
             "/StartStop" => {
-                // Accept boolean writes only (VRM/Cerbo)
-                let v_bool = matches!(sv, serde_json::Value::Bool(true));
-                let v = if v_bool { 1 } else { 0 };
+                // Accept both boolean and numeric writes (VRM/Cerbo)
+                let v = match sv {
+                    serde_json::Value::Bool(b) => {
+                        if b {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    serde_json::Value::Number(ref n) => {
+                        if n.as_u64().unwrap_or(0) > 0 || n.as_i64().unwrap_or(0) > 0 {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    _ => 0,
+                };
                 let _ = shared.commands_tx.send(DriverCommand::SetStartStop(v));
             }
             "/SetCurrent" => {

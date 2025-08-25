@@ -1373,7 +1373,7 @@ impl AlfenDriver {
                                     decode_32bit_float(&v[2..4]).unwrap_or(0.0) as f64,
                                     decode_32bit_float(&v[4..6]).unwrap_or(0.0) as f64,
                                 ), _ => (0.0,0.0,0.0)};
-                                let (l1_p, l2_p, l3_p, p_total) = match power_regs { Some(v) if v.len()>=8 => {
+                                let (mut l1_p, mut l2_p, mut l3_p, mut p_total) = match power_regs { Some(v) if v.len()>=8 => {
                                     let p1=decode_32bit_float(&v[0..2]).unwrap_or(0.0) as f64;
                                     let p2=decode_32bit_float(&v[2..4]).unwrap_or(0.0) as f64;
                                     let p3=decode_32bit_float(&v[4..6]).unwrap_or(0.0) as f64;
@@ -1381,6 +1381,14 @@ impl AlfenDriver {
                                     let s=|x:f64| if x.is_finite(){x}else{0.0};
                                     (s(p1),s(p2),s(p3),s(pt))
                                 }, _ => (0.0,0.0,0.0,0.0)};
+                                // Fallback for chargers that report 0 for per-phase or total power: approximate using V*I
+                                let approx = |v: f64, i: f64| (v * i).round();
+                                if l1_p.abs() < 1.0 { l1_p = approx(l1_v, l1_i); }
+                                if l2_p.abs() < 1.0 { l2_p = approx(l2_v, l2_i); }
+                                if l3_p.abs() < 1.0 { l3_p = approx(l3_v, l3_i); }
+                                if p_total.abs() < 1.0 {
+                                    p_total = l1_p + l2_p + l3_p;
+                                }
                                 let energy_kwh = match energy_regs { Some(v) if v.len()>=4 => decode_64bit_float(&v[0..4]).unwrap_or(0.0)/1000.0, _ => 0.0 };
                                 let status_base = match status_regs { Some(v) if v.len()>=5 => {
                                     let s = decode_string(&v[0..5], None).unwrap_or_default();
@@ -1763,6 +1771,8 @@ impl AlfenDriver {
         dbus.start().await?;
         self.dbus = Some(dbus);
 
+        // Prepare initial control values before mutably borrowing self.dbus
+        let start_stop_init: u8 = self.start_stop as u8;
         // Publish management and core info
         if let Some(d) = &mut self.dbus {
             // Device instance and connection are safe to publish
@@ -1796,11 +1806,7 @@ impl AlfenDriver {
                 .ensure_item("/Mode", serde_json::json!(self.current_mode as u8), true)
                 .await;
             let _ = d
-                .ensure_item(
-                    "/StartStop",
-                    serde_json::json!(matches!(self.start_stop, StartStopState::Enabled)),
-                    true,
-                )
+                .ensure_item("/StartStop", serde_json::json!(start_stop_init), true)
                 .await;
             let _ = d
                 .ensure_item(
@@ -1890,9 +1896,8 @@ impl AlfenDriver {
             }
         ));
         if let Some(dbus) = &mut self.dbus {
-            // Export StartStop as boolean for VRM compatibility
             let _ = dbus
-                .update_path("/StartStop", serde_json::json!(value == 1))
+                .update_path("/StartStop", serde_json::json!(value))
                 .await;
         }
         self.persistence.set_start_stop(self.start_stop as u32);
