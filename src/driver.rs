@@ -1467,29 +1467,40 @@ impl AlfenDriver {
         };
 
         // PV reader task (dedicated single-thread runtime) to avoid Send bounds
+        // Use a stop channel to allow graceful shutdown
+        let (pv_stop_tx, pv_stop_rx) = watch::channel(false);
         let pv_handle = {
             let driver_for_task = driver.clone();
+            let pv_stop_rx = pv_stop_rx;
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
                     .expect("pv runtime");
                 rt.block_on(async move {
+                    let mut stop_rx = pv_stop_rx;
                     let mut ticker = interval(Duration::from_millis(1000));
                     loop {
-                        let last_power = {
-                            let drv = driver_for_task.lock().await;
-                            drv.last_total_power
-                        };
-                        let excess_opt = {
-                            let drv = driver_for_task.lock().await;
-                            drv.calculate_excess_pv_power(last_power).await
-                        };
-                        if let Some(ex) = excess_opt {
-                            let mut drv2 = driver_for_task.lock().await;
-                            drv2.last_excess_pv_power_w = ex;
+                        tokio::select! {
+                            _ = ticker.tick() => {
+                                let last_power = {
+                                    let drv = driver_for_task.lock().await;
+                                    drv.last_total_power
+                                };
+                                let excess_opt = {
+                                    let drv = driver_for_task.lock().await;
+                                    drv.calculate_excess_pv_power(last_power).await
+                                };
+                                if let Some(ex) = excess_opt {
+                                    let mut drv2 = driver_for_task.lock().await;
+                                    drv2.last_excess_pv_power_w = ex;
+                                }
+                            }
+                            res = stop_rx.changed() => {
+                                let _ = res; // treat any change or closure as stop
+                                break;
+                            }
                         }
-                        ticker.tick().await;
                     }
                 });
             })
@@ -1514,8 +1525,12 @@ impl AlfenDriver {
         }
 
         exporter_handle.abort();
-        // Stop PV thread
-        pv_handle.thread().unpark();
+        // Signal and join PV thread without blocking the async runtime
+        let _ = pv_stop_tx.send(true);
+        let _ = tokio::task::spawn_blocking(move || {
+            let _ = pv_handle.join();
+        })
+        .await;
 
         Ok(())
     }
