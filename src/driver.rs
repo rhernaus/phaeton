@@ -1878,9 +1878,18 @@ impl AlfenDriver {
             _ => ChargingMode::Manual,
         };
         if new_mode as u8 != self.current_mode as u8 {
+            let name = |v: u8| match v {
+                0 => "Manual",
+                1 => "Auto",
+                2 => "Scheduled",
+                _ => "Unknown",
+            };
             self.logger.info(&format!(
-                "Mode changed: {} -> {}",
-                self.current_mode as u8, new_mode as u8
+                "Mode changed: {} ({}) -> {} ({})",
+                self.current_mode as u8,
+                name(self.current_mode as u8),
+                new_mode as u8,
+                name(new_mode as u8)
             ));
         }
         self.current_mode = new_mode;

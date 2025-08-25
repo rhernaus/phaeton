@@ -1062,6 +1062,43 @@ impl BusItem {
                     _ => 0,
                 };
                 serde_json::json!(v)
+            } else if self.path == "/Mode" {
+                // Normalize Mode to canonical 0/1/2 regardless of input type/text
+                let m: u8 = match sv_local {
+                    serde_json::Value::Number(ref n) => {
+                        let v = n
+                            .as_u64()
+                            .or_else(|| n.as_i64().map(|i| i as u64))
+                            .unwrap_or(0) as u8;
+                        match v {
+                            0 => 0,
+                            1 => 1,
+                            2 => 2,
+                            _ => 0,
+                        }
+                    }
+                    serde_json::Value::Bool(b) => {
+                        if b {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    serde_json::Value::String(ref s) => {
+                        let t = s.trim().to_ascii_lowercase();
+                        if t == "manual" || t == "0" {
+                            0
+                        } else if t == "auto" || t == "1" {
+                            1
+                        } else if t == "scheduled" || t == "schedule" || t == "2" {
+                            2
+                        } else {
+                            0
+                        }
+                    }
+                    _ => 0,
+                };
+                serde_json::json!(m)
             } else {
                 sv_local.clone()
             };
@@ -1109,10 +1146,11 @@ impl BusItem {
         let shared = self.shared.lock().unwrap();
         match self.path.as_str() {
             "/Mode" => {
-                let m = sv
+                // Use normalized value to ensure canonical mapping
+                let m = normalized_json
                     .as_u64()
                     .map(|v| v as u8)
-                    .or_else(|| sv.as_i64().map(|v| v as u8))
+                    .or_else(|| normalized_json.as_i64().map(|v| v as u8))
                     .unwrap_or(0);
                 let _ = shared.commands_tx.send(DriverCommand::SetMode(m));
             }
