@@ -87,7 +87,7 @@ phaeton/
 
 ---
 
-# Phase 2: Core Communication & Control (Priority: High) 🚧
+# Phase 2: Core Communication & Control (Priority: High) ✅ MOSTLY COMPLETE
 
 ## 2.1 Modbus TCP Client ✅ COMPLETED
 - [x] **Implement async Modbus TCP client** using `tokio-modbus`
@@ -115,6 +115,8 @@ phaeton/
 - [ ] **Create event system** for status changes and notifications (beyond SSE)
 - [x] **Wire persistence and sessions** into the driver run loop
 - [ ] **Implement status mapping parity** (e.g., LOW_SOC, WAIT_* states)
+  - Current: Disconnected/Connected/Charging/Wait Sun/Wait Start/Low SOC
+  - Next: error states parity (ground fault, overtemp, etc.)
 
 ## 2.3 Session Management
 - [x] **Implement charging session tracking** with start/end detection
@@ -127,12 +129,15 @@ phaeton/
 
 # Phase 3: System Integration (Priority: High) 🚧
 
-## 3.1 D-Bus Integration
-- [x] **Implement D-Bus service** using `zbus` and acquire name `com.victronenergy.evcharger.phaeton_<instance>`
+## 3.1 D‑Bus Integration
+- [x] **Implement D‑Bus service** using `zbus` and acquire name `com.victronenergy.evcharger.phaeton_<instance>`
 - [x] **Expose `com.victronenergy.BusItem`** for core/writable paths mapped to driver commands
 - [x] **Cache and update common paths** via internal store with `BusItem` getters
+- [x] **Emit PropertiesChanged + ItemsChanged signals on updates** (VeDbus compatible)
+- [x] **Normalize writes**: `/StartStop` (bool/num/string→0/1), `/Mode` (→0/1/2)
+- [x] **Eliminate D‑Bus handle races** with shared Arc<Mutex<DbusService>>
 - [ ] **Export complete object tree** with properties for all Venus OS paths (beyond cached reflection)
-- [ ] **Implement Victron energy rate detection** from system D-Bus
+- [ ] **Implement Victron energy rate detection** from system D‑Bus
 
 ## 3.2 Web Server & API
 - [x] **Migrate web framework**: fully migrated from `warp` to `axum` (no legacy code)
@@ -238,7 +243,7 @@ phaeton/
 - [ ] All existing Python functionality ported to Rust
 - [ ] Performance improvements (2-5x better resource usage)
 - [ ] Memory safety verified with comprehensive testing
-- [ ] Deployment on Venus OS with full D-Bus integration
+- [ ] Deployment on Venus OS with full D‑Bus integration
 - [ ] Web UI functional with all features working
 
 ---
@@ -251,6 +256,8 @@ phaeton/
 5. ✅ Implement Modbus TCP client
 6. ✅ Build core driver logic (polling + controls + sessions + persistence)
 7. 🚧 Expose full D‑Bus paths and enrich Web API
+8. ✅ Fix Start/Stop & Mode normalization; add human‑readable logs for `/Status` & `/Mode`
+9. ✅ Auto‑mode grace logic: wait for sun on entry; dips only start timer when already charging
 
 ## Additional Completed Infrastructure
 7. ✅ GitHub Actions CI/CD workflow present (tests, audit, macOS/Linux builds, cross)

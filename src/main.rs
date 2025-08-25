@@ -40,8 +40,8 @@ async fn main() -> Result<()> {
         }
     });
 
-    // Run the driver in the current task
-    match Arc::clone(&driver_arc).lock().await.run().await {
+    // Run the driver loop without holding the mutex for the entire duration
+    match phaeton::driver::AlfenDriver::run_on_arc(driver_arc.clone()).await {
         Ok(_) => {
             info!("Driver shutdown complete");
             // Ensure web server task ends (it runs until process stops)

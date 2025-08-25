@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tokio::time::{Duration, timeout};
-use zbus::object_server::{InterfaceRef, SignalContext};
+use zbus::object_server::{InterfaceRef, SignalEmitter};
 use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 use zbus::{Connection, Proxy, Result as ZbusResult, names::WellKnownName};
 
@@ -278,7 +278,7 @@ impl RootBus {
 
     #[zbus(signal)]
     async fn items_changed(
-        ctxt: &SignalContext<'_>,
+        ctxt: &SignalEmitter<'_>,
         changes: std::collections::HashMap<&str, std::collections::HashMap<&str, OwnedValue>>,
     ) -> zbus::Result<()>;
 }
@@ -345,7 +345,10 @@ impl DbusService {
             logger,
             service_name,
             connection: None,
-            shared: Arc::new(Mutex::new(DbusSharedState::new(commands_tx.clone()))),
+            shared: Arc::new(Mutex::new(DbusSharedState::new(
+                commands_tx.clone(),
+                charger_path.clone(),
+            ))),
             registered_paths: HashSet::new(),
             charger_path,
             commands_tx,
@@ -442,6 +445,11 @@ impl DbusService {
             .await
             .map_err(|e| PhaetonError::dbus(format!("Register root BusItem failed: {}", e)))?;
         self.connection = Some(connection);
+        // Make connection available to BusItem handlers for immediate signal emission
+        {
+            let mut shared = self.shared.lock().unwrap();
+            shared.connection = Some(self.connection.as_ref().unwrap().clone());
+        }
         Ok(())
     }
 
@@ -535,8 +543,38 @@ impl DbusService {
 
         // Elevate important identity/management paths to INFO level for visibility (only on change)
         match path {
-            "/DeviceInstance" | "/ProductName" | "/ProductId" | "/FirmwareVersion" | "/Serial"
-            | "/Status" => self.logger.info(&format!("DBus set {} = {}", path, value)),
+            "/Status" => {
+                let name = value
+                    .as_u64()
+                    .map(|v| match v {
+                        0 => "Disconnected",
+                        1 => "Connected",
+                        2 => "Charging",
+                        4 => "Wait Sun",
+                        6 => "Wait Start",
+                        7 => "Low SOC",
+                        _ => "Unknown",
+                    })
+                    .unwrap_or("Unknown");
+                self.logger
+                    .info(&format!("DBus set /Status = {} ({})", value, name));
+            }
+            "/Mode" => {
+                let name = value
+                    .as_u64()
+                    .map(|v| match v {
+                        0 => "Manual",
+                        1 => "Auto",
+                        2 => "Scheduled",
+                        _ => "Unknown",
+                    })
+                    .unwrap_or("Unknown");
+                self.logger
+                    .info(&format!("DBus set /Mode = {} ({})", value, name));
+            }
+            "/DeviceInstance" | "/ProductName" | "/ProductId" | "/FirmwareVersion" | "/Serial" => {
+                self.logger.info(&format!("DBus set {} = {}", path, value))
+            }
             _ => self.logger.debug(&format!("DBus set {} = {}", path, value)),
         };
 
@@ -742,13 +780,13 @@ impl DbusService {
             }
             // Emit change signals so listeners (VeDbusItemImport) update immediately
             // 1) Per-path PropertiesChanged on the BusItem
-            let item_ctx = SignalContext::new(
+            let item_ctx = SignalEmitter::new(
                 conn,
                 OwnedObjectPath::try_from(path).map_err(|e| {
                     PhaetonError::dbus(format!("Invalid object path '{}': {}", path, e))
                 })?,
             )
-            .map_err(|e| PhaetonError::dbus(format!("SignalContext new failed: {}", e)))?;
+            .map_err(|e| PhaetonError::dbus(format!("SignalEmitter new failed: {}", e)))?;
             let mut changes: std::collections::HashMap<&str, OwnedValue> =
                 std::collections::HashMap::new();
             changes.insert("Value", BusItem::serde_to_owned_value(&value));
@@ -759,8 +797,8 @@ impl DbusService {
             let _ = BusItem::properties_changed(&item_ctx, changes).await;
 
             // 2) Root ItemsChanged summarizing the changed path
-            let root_ctx = SignalContext::new(conn, self.charger_path.clone())
-                .map_err(|e| PhaetonError::dbus(format!("Root SignalContext failed: {}", e)))?;
+            let root_ctx = SignalEmitter::new(conn, self.charger_path.clone())
+                .map_err(|e| PhaetonError::dbus(format!("Root SignalEmitter failed: {}", e)))?;
             let mut inner: std::collections::HashMap<&str, OwnedValue> =
                 std::collections::HashMap::new();
             inner.insert("Value", BusItem::serde_to_owned_value(&value));
@@ -787,6 +825,76 @@ impl DbusService {
             self.update_path(&k, v).await?;
         }
         Ok(())
+    }
+
+    /// Export a snapshot (subset) to D-Bus. Call from a dedicated exporter task.
+    pub async fn export_snapshot(&mut self, snapshot: &serde_json::Value) -> Result<()> {
+        let mut updates: Vec<(String, serde_json::Value)> = Vec::with_capacity(24);
+
+        let g = |k: &str| snapshot.get(k).cloned();
+        if let Some(v) = g("l1_voltage") {
+            updates.push(("/Ac/L1/Voltage".to_string(), v));
+        }
+        if let Some(v) = g("l2_voltage") {
+            updates.push(("/Ac/L2/Voltage".to_string(), v));
+        }
+        if let Some(v) = g("l3_voltage") {
+            updates.push(("/Ac/L3/Voltage".to_string(), v));
+        }
+        if let Some(v) = g("l1_current") {
+            updates.push(("/Ac/L1/Current".to_string(), v));
+        }
+        if let Some(v) = g("l2_current") {
+            updates.push(("/Ac/L2/Current".to_string(), v));
+        }
+        if let Some(v) = g("l3_current") {
+            updates.push(("/Ac/L3/Current".to_string(), v));
+        }
+        if let Some(v) = g("l1_power") {
+            updates.push(("/Ac/L1/Power".to_string(), v));
+        }
+        if let Some(v) = g("l2_power") {
+            updates.push(("/Ac/L2/Power".to_string(), v));
+        }
+        if let Some(v) = g("l3_power") {
+            updates.push(("/Ac/L3/Power".to_string(), v));
+        }
+        if let Some(v) = g("ac_power") {
+            updates.push(("/Ac/Power".to_string(), v));
+        }
+        if let Some(v) = g("status") {
+            updates.push(("/Status".to_string(), v));
+        }
+        if let Some(v) = g("station_max_current") {
+            updates.push(("/MaxCurrent".to_string(), v));
+        }
+        if let Some(session) = snapshot.get("session").and_then(|s| s.as_object())
+            && let Some(v) = session.get("energy_delivered_kwh").cloned()
+        {
+            updates.push(("/Ac/Energy/Forward".to_string(), v));
+        }
+        if let Some(v) = g("total_energy_kwh") {
+            updates.push(("/Ac/Energy/Total".to_string(), v));
+        }
+        if let Some(v) = g("ac_current") {
+            updates.push(("/Ac/Current".to_string(), v.clone()));
+            updates.push(("/Current".to_string(), v));
+        }
+        if let Some(v) = g("active_phases") {
+            updates.push(("/Ac/PhaseCount".to_string(), v));
+        }
+        if let Some(v) = g("set_current") {
+            updates.push(("/SetCurrent".to_string(), v));
+        }
+        if let Some(v) = g("charging_time_sec").or_else(|| {
+            snapshot
+                .get("session")
+                .and_then(|s| s.get("charging_time_sec"))
+                .cloned()
+        }) {
+            updates.push(("/ChargingTime".to_string(), v));
+        }
+        self.update_paths(updates).await
     }
 
     /// Read last value (local cache)
@@ -846,14 +954,20 @@ struct DbusSharedState {
     paths: HashMap<String, serde_json::Value>,
     writable: HashSet<String>,
     commands_tx: mpsc::UnboundedSender<DriverCommand>,
+    /// Optional: connection handle for emitting signals directly from SetValue
+    connection: Option<Connection>,
+    /// Root object path for ItemsChanged
+    root_path: OwnedObjectPath,
 }
 
 impl DbusSharedState {
-    fn new(commands_tx: mpsc::UnboundedSender<DriverCommand>) -> Self {
+    fn new(commands_tx: mpsc::UnboundedSender<DriverCommand>, root_path: OwnedObjectPath) -> Self {
         Self {
             paths: HashMap::new(),
             writable: HashSet::new(),
             commands_tx,
+            connection: None,
+            root_path,
         }
     }
 }
@@ -927,36 +1041,157 @@ impl BusItem {
     /// Attempt to set the value; returns 0 on success (VeDbus-compatible)
     #[zbus(name = "SetValue")]
     async fn set_value(&self, value: OwnedValue) -> i32 {
-        let mut shared = self.shared.lock().unwrap();
-        if !shared.writable.contains(&self.path) {
-            return 1; // NOT OK
+        // Stage 1: validate, normalize, cache, and capture connection and roots without any await
+        let (conn_opt, root_path, normalized_json, sv) = {
+            let mut shared = self.shared.lock().unwrap();
+            if !shared.writable.contains(&self.path) {
+                return 1; // NOT OK
+            }
+            let sv_local = Self::owned_value_to_serde(&value);
+            let normalized = if self.path == "/StartStop" {
+                let v = match sv_local {
+                    serde_json::Value::Bool(b) => {
+                        if b {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    serde_json::Value::Number(ref n) => {
+                        if n.as_u64().unwrap_or(0) > 0 || n.as_i64().unwrap_or(0) > 0 {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    serde_json::Value::String(ref s) => {
+                        let t = s.trim().to_ascii_lowercase();
+                        if t == "1" || t == "true" || t == "on" || t == "enabled" {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    _ => 0,
+                };
+                serde_json::json!(v)
+            } else if self.path == "/Mode" {
+                // Normalize Mode to canonical 0/1/2 regardless of input type/text
+                let m: u8 = match sv_local {
+                    serde_json::Value::Number(ref n) => {
+                        let v = n
+                            .as_u64()
+                            .or_else(|| n.as_i64().map(|i| i as u64))
+                            .unwrap_or(0) as u8;
+                        match v {
+                            0 => 0,
+                            1 => 1,
+                            2 => 2,
+                            _ => 0,
+                        }
+                    }
+                    serde_json::Value::Bool(b) => {
+                        if b {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    serde_json::Value::String(ref s) => {
+                        let t = s.trim().to_ascii_lowercase();
+                        if t == "manual" || t == "0" {
+                            0
+                        } else if t == "auto" || t == "1" {
+                            1
+                        } else if t == "scheduled" || t == "schedule" || t == "2" {
+                            2
+                        } else {
+                            0
+                        }
+                    }
+                    _ => 0,
+                };
+                serde_json::json!(m)
+            } else {
+                sv_local.clone()
+            };
+            shared.paths.insert(self.path.clone(), normalized.clone());
+            (
+                shared.connection.clone(),
+                shared.root_path.clone(),
+                normalized,
+                sv_local,
+            )
+        };
+
+        // Emit immediate change signals to mirror VeDbus behaviour (avoids UI comm errors)
+        if let Some(conn) = conn_opt {
+            if let Ok(obj_path) = OwnedObjectPath::try_from(self.path.as_str())
+                && let Ok(item_ctx) = SignalEmitter::new(&conn, obj_path)
+            {
+                let mut changes: std::collections::HashMap<&str, OwnedValue> =
+                    std::collections::HashMap::new();
+                changes.insert("Value", BusItem::serde_to_owned_value(&normalized_json));
+                let text = format_text_value(&normalized_json);
+                if let Ok(text_ov) = OwnedValue::try_from(Value::from(text.as_str())) {
+                    changes.insert("Text", text_ov);
+                }
+                let _ = BusItem::properties_changed(&item_ctx, changes).await;
+            }
+            if let Ok(root_ctx) = SignalEmitter::new(&conn, root_path) {
+                let mut inner: std::collections::HashMap<&str, OwnedValue> =
+                    std::collections::HashMap::new();
+                inner.insert("Value", BusItem::serde_to_owned_value(&normalized_json));
+                let text = format_text_value(&normalized_json);
+                if let Ok(text_ov) = OwnedValue::try_from(Value::from(text.as_str())) {
+                    inner.insert("Text", text_ov);
+                }
+                let mut outer: std::collections::HashMap<
+                    &str,
+                    std::collections::HashMap<&str, OwnedValue>,
+                > = std::collections::HashMap::new();
+                outer.insert(self.path.as_str(), inner);
+                let _ = RootBus::items_changed(&root_ctx, outer).await;
+            }
         }
 
-        let sv = Self::owned_value_to_serde(&value);
-        // Update cache
-        shared.paths.insert(self.path.clone(), sv.clone());
-
         // Map writable items to driver commands
+        let shared = self.shared.lock().unwrap();
         match self.path.as_str() {
             "/Mode" => {
-                let m = sv
+                // Use normalized value to ensure canonical mapping
+                let m = normalized_json
                     .as_u64()
                     .map(|v| v as u8)
-                    .or_else(|| sv.as_i64().map(|v| v as u8))
+                    .or_else(|| normalized_json.as_i64().map(|v| v as u8))
                     .unwrap_or(0);
                 let _ = shared.commands_tx.send(DriverCommand::SetMode(m));
             }
             "/StartStop" => {
-                let v = sv
+                // Use the already-normalized value (0/1) to avoid mismatches between cache/signals and driver command
+                let v: u8 = normalized_json
                     .as_u64()
-                    .map(|x| x as u8)
-                    .or_else(|| sv.as_i64().map(|x| x as u8))
+                    .map(|u| if u > 0 { 1 } else { 0 })
+                    .or_else(|| normalized_json.as_i64().map(|i| if i > 0 { 1 } else { 0 }))
+                    .or_else(|| normalized_json.as_bool().map(|b| if b { 1 } else { 0 }))
                     .unwrap_or(0);
                 let _ = shared.commands_tx.send(DriverCommand::SetStartStop(v));
             }
             "/SetCurrent" => {
                 let a = sv.as_f64().unwrap_or(0.0) as f32;
                 let _ = shared.commands_tx.send(DriverCommand::SetCurrent(a));
+            }
+            "/EnableDisplay" | "/AutoStart" => {
+                // Accept both boolean and numeric writes for convenience
+                let v = sv
+                    .as_u64()
+                    .map(|x| x as u8)
+                    .or_else(|| sv.as_i64().map(|x| x as u8))
+                    .or_else(|| sv.as_bool().map(|b| if b { 1 } else { 0 }))
+                    .unwrap_or(0);
+                // Reflect value in cache already updated; also propagate via update signals
+                // Not sending a driver command for these yet.
+                let _ = v; // placeholder in case of future command mapping
             }
             _ => {}
         }
@@ -991,7 +1226,7 @@ impl BusItem {
 
     #[zbus(signal)]
     async fn properties_changed(
-        ctxt: &SignalContext<'_>,
+        ctxt: &SignalEmitter<'_>,
         changes: std::collections::HashMap<&str, OwnedValue>,
     ) -> zbus::Result<()>;
 }

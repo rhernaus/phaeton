@@ -492,7 +492,7 @@ $('charge_btn').addEventListener('click', async () => {
 
   try {
     setChargeUI(!isEnabled);
-    await postJSON('/api/startstop', { enabled: !isEnabled });
+    await postJSON('/api/startstop', { value: !isEnabled ? 1 : 0 });
 
     // Success animation
     btn.style.transform = 'scale(1.05)';

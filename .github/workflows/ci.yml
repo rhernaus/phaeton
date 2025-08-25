@@ -168,3 +168,24 @@ jobs:
         with:
           name: phaeton-${{ matrix.target }}
           path: target/${{ matrix.target }}/release/phaeton
+
+      - name: Compute short commit hash
+        id: shortsha
+        shell: bash
+        run: echo "value=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+
+      - name: Package tarball (for verification)
+        uses: ./.github/actions/package-tarball
+        with:
+          target: ${{ matrix.target }}
+          tag: ci-${{ steps.shortsha.outputs.value }}
+          binary_path: target/${{ matrix.target }}/release/phaeton
+          config_path: phaeton_config.sample.yaml
+          webui_dir: webui
+          dest_dir: dist
+
+      - name: Upload packaged tarball (for verification)
+        uses: actions/upload-artifact@v4
+        with:
+          name: tarball-${{ matrix.target }}
+          path: dist/phaeton-ci-${{ steps.shortsha.outputs.value }}-${{ matrix.target }}.tar.gz

@@ -71,7 +71,7 @@ impl ChargingControls {
         let effective = match mode {
             ChargingMode::Manual => requested_current.min(station_max_current),
             ChargingMode::Auto => {
-                // Interpret solar_power as excess Watts available for charging.
+                // Interpret solar_power as (smoothed) excess Watts available for charging.
                 // Convert Watts to Amps using nominal 230V per phase and assume 3 phases.
                 let excess_watts = solar_power.unwrap_or(0.0).max(0.0);
                 let nominal_voltage = 230.0f32;
@@ -90,6 +90,42 @@ impl ChargingControls {
             }
         };
 
+        Ok(effective)
+    }
+
+    /// Synchronous wrapper for non-async control paths (same logic)
+    #[allow(clippy::too_many_arguments)]
+    pub fn blocking_compute_effective_current(
+        &self,
+        mode: ChargingMode,
+        start_stop: StartStopState,
+        requested_current: f32,
+        station_max_current: f32,
+        _current_time: f64,
+        solar_power: Option<f32>,
+        config: &crate::config::Config,
+    ) -> Result<f32> {
+        if matches!(start_stop, StartStopState::Stopped) {
+            return Ok(0.0);
+        }
+        let effective = match mode {
+            ChargingMode::Manual => requested_current.min(station_max_current),
+            ChargingMode::Auto => {
+                let excess_watts = solar_power.unwrap_or(0.0).max(0.0);
+                let nominal_voltage = 230.0f32;
+                let phases = 3.0f32;
+                let amps = excess_watts / (phases * nominal_voltage);
+                let amps = if amps < 0.1 { 0.0 } else { amps };
+                amps.min(station_max_current)
+            }
+            ChargingMode::Scheduled => {
+                if Self::is_within_any_schedule(config) {
+                    station_max_current
+                } else {
+                    0.0
+                }
+            }
+        };
         Ok(effective)
     }
 

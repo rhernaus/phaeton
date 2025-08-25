@@ -254,6 +254,17 @@ pub struct ControlsConfig {
 
     /// Verification delay in milliseconds
     pub verify_delay: u32,
+
+    /// Time window to compensate measurement lag between Victron house loads
+    /// and charger Modbus readings (milliseconds). During this window after a
+    /// set-current change we subtract the expected EV power (derived from the
+    /// last sent current) from house consumption instead of the charger-reported
+    /// power to avoid double-counting.
+    pub ev_reporting_lag_ms: u32,
+
+    /// Exponential moving average smoothing factor for PV excess (0..1)
+    /// Lower values increase smoothing; 0 disables and uses raw values.
+    pub pv_excess_ema_alpha: f32,
 }
 
 /// Web server configuration
@@ -295,7 +306,7 @@ impl Default for RegistersConfig {
         Self {
             voltages: 306,
             currents: 320,
-            power: 344,
+            power: 338,
             energy: 374,
             status: 1201,
             amps_config: 1210,
@@ -365,6 +376,8 @@ impl Default for ControlsConfig {
             min_charge_duration_seconds: 300,
             current_update_interval: 30000,
             verify_delay: 100,
+            ev_reporting_lag_ms: 2000,
+            pv_excess_ema_alpha: 0.4,
         }
     }
 }
