@@ -1039,12 +1039,18 @@ impl AlfenDriver {
         };
         let session = {
             let mut s = serde_json::json!({});
-            let stats = self.sessions.get_session_stats();
-            let charging_time_sec = stats
-                .get("session_duration_min")
-                .and_then(|v| v.as_f64())
-                .map(|m| (m * 60.0).round() as i64)
-                .unwrap_or(0);
+            // Prefer exact seconds derived from session start/end times
+            let charging_time_sec: i64 = if let Some(cur) = self.sessions.current_session.as_ref() {
+                (chrono::Utc::now() - cur.start_time).num_seconds().max(0)
+            } else if let Some(last) = self.sessions.last_session.as_ref() {
+                if let Some(end) = last.end_time {
+                    (end - last.start_time).num_seconds().max(0)
+                } else {
+                    0
+                }
+            } else {
+                0
+            };
             s["charging_time_sec"] = serde_json::json!(charging_time_sec);
             let sessions_state = self.sessions_snapshot();
             if let Some(obj) = sessions_state.as_object() {
