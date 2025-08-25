@@ -520,16 +520,27 @@ impl DbusService {
 
     /// Update a D-Bus path value (local cache and reflective properties)
     pub async fn update_path(&mut self, path: &str, value: serde_json::Value) -> Result<()> {
-        // Elevate important identity/management paths to INFO level for visibility
+        // Skip no-op updates to avoid log spam and unnecessary signals
+        {
+            let shared = self.shared.lock().unwrap();
+            if let Some(old) = shared.paths.get(path)
+                && old == &value
+            {
+                return Ok(());
+            }
+        }
+
+        // Ensure BusItem exists, default not writable
+        let _ = self.ensure_item(path, value.clone(), false).await;
+
+        // Elevate important identity/management paths to INFO level for visibility (only on change)
         match path {
             "/DeviceInstance" | "/ProductName" | "/ProductId" | "/FirmwareVersion" | "/Serial"
             | "/Status" => self.logger.info(&format!("DBus set {} = {}", path, value)),
             _ => self.logger.debug(&format!("DBus set {} = {}", path, value)),
         };
-        // Ensure BusItem exists, default not writable
-        let _ = self.ensure_item(path, value.clone(), false).await;
 
-        // Update shared cache
+        // Update shared cache with new value
         {
             let mut shared = self.shared.lock().unwrap();
             shared.paths.insert(path.to_string(), value.clone());
