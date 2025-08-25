@@ -543,8 +543,25 @@ impl DbusService {
 
         // Elevate important identity/management paths to INFO level for visibility (only on change)
         match path {
-            "/DeviceInstance" | "/ProductName" | "/ProductId" | "/FirmwareVersion" | "/Serial"
-            | "/Status" => self.logger.info(&format!("DBus set {} = {}", path, value)),
+            "/Status" => {
+                let name = value
+                    .as_u64()
+                    .map(|v| match v {
+                        0 => "Disconnected",
+                        1 => "Connected",
+                        2 => "Charging",
+                        4 => "Wait Sun",
+                        6 => "Wait Start",
+                        7 => "Low SOC",
+                        _ => "Unknown",
+                    })
+                    .unwrap_or("Unknown");
+                self.logger
+                    .info(&format!("DBus set /Status = {} ({})", value, name));
+            }
+            "/DeviceInstance" | "/ProductName" | "/ProductId" | "/FirmwareVersion" | "/Serial" => {
+                self.logger.info(&format!("DBus set {} = {}", path, value))
+            }
             _ => self.logger.debug(&format!("DBus set {} = {}", path, value)),
         };
 
