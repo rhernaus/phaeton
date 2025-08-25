@@ -35,7 +35,12 @@ pub struct ModeBody {
 
 #[derive(Deserialize, ToSchema)]
 pub struct StartStopBody {
-    pub value: u8,
+    /// Preferred numeric value: 1 = enable, 0 = stop
+    #[serde(default)]
+    pub value: Option<u8>,
+    /// Back-compat boolean flag accepted by older UIs
+    #[serde(default)]
+    pub enabled: Option<bool>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -99,7 +104,11 @@ async fn set_startstop(
     Json(body): Json<StartStopBody>,
 ) -> impl IntoResponse {
     let mut drv = state.driver.lock().await;
-    drv.set_start_stop(body.value).await;
+    let v = body
+        .value
+        .or_else(|| body.enabled.map(|b| if b { 1 } else { 0 }))
+        .unwrap_or(0);
+    drv.set_start_stop(v).await;
     (StatusCode::OK, Json(serde_json::json!({"ok":true})))
 }
 
