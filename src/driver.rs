@@ -1582,7 +1582,11 @@ impl AlfenDriver {
                 .ensure_item("/Mode", serde_json::json!(self.current_mode as u8), true)
                 .await;
             let _ = d
-                .ensure_item("/StartStop", serde_json::json!(self.start_stop as u8), true)
+                .ensure_item(
+                    "/StartStop",
+                    serde_json::json!(matches!(self.start_stop, StartStopState::Enabled)),
+                    true,
+                )
                 .await;
             let _ = d
                 .ensure_item(
@@ -1658,8 +1662,9 @@ impl AlfenDriver {
             StartStopState::Stopped
         };
         if let Some(dbus) = &mut self.dbus {
+            // Export StartStop as boolean for VRM compatibility
             let _ = dbus
-                .update_path("/StartStop", serde_json::json!(value))
+                .update_path("/StartStop", serde_json::json!(value == 1))
                 .await;
         }
         self.persistence.set_start_stop(self.start_stop as u32);

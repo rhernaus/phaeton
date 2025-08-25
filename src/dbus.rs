@@ -1017,16 +1017,26 @@ impl BusItem {
                 let _ = shared.commands_tx.send(DriverCommand::SetMode(m));
             }
             "/StartStop" => {
-                let v = sv
-                    .as_u64()
-                    .map(|x| x as u8)
-                    .or_else(|| sv.as_i64().map(|x| x as u8))
-                    .unwrap_or(0);
+                // Accept boolean writes only (VRM/Cerbo)
+                let v_bool = matches!(sv, serde_json::Value::Bool(true));
+                let v = if v_bool { 1 } else { 0 };
                 let _ = shared.commands_tx.send(DriverCommand::SetStartStop(v));
             }
             "/SetCurrent" => {
                 let a = sv.as_f64().unwrap_or(0.0) as f32;
                 let _ = shared.commands_tx.send(DriverCommand::SetCurrent(a));
+            }
+            "/EnableDisplay" | "/AutoStart" => {
+                // Accept both boolean and numeric writes for convenience
+                let v = sv
+                    .as_u64()
+                    .map(|x| x as u8)
+                    .or_else(|| sv.as_i64().map(|x| x as u8))
+                    .or_else(|| sv.as_bool().map(|b| if b { 1 } else { 0 }))
+                    .unwrap_or(0);
+                // Reflect value in cache already updated; also propagate via update signals
+                // Not sending a driver command for these yet.
+                let _ = v; // placeholder in case of future command mapping
             }
             _ => {}
         }
