@@ -1034,6 +1034,14 @@ impl BusItem {
                             0
                         }
                     }
+                    serde_json::Value::String(ref s) => {
+                        let t = s.trim().to_ascii_lowercase();
+                        if t == "1" || t == "true" || t == "on" || t == "enabled" {
+                            1
+                        } else {
+                            0
+                        }
+                    }
                     _ => 0,
                 };
                 serde_json::json!(v)
