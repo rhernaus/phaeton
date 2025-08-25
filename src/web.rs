@@ -83,18 +83,7 @@ async fn status(State(state): State<AppState>) -> impl IntoResponse {
     // Lock-free path: try to read the latest snapshot, else return unavailable
     let snapshot = state.snapshot_rx.borrow().clone();
     // Always returns something; initial snapshot is minimal but valid
-    if true {
-        Json((*snapshot).clone()).into_response()
-    } else {
-        (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(serde_json::json!({
-                "error": "status_unavailable",
-                "reason": "no_snapshot",
-            })),
-        )
-            .into_response()
-    }
+    Json((*snapshot).clone()).into_response()
 }
 
 #[utoipa::path(post, path = "/api/mode", request_body = ModeBody, responses((status = 200)))]
