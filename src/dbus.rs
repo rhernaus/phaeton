@@ -345,7 +345,10 @@ impl DbusService {
             logger,
             service_name,
             connection: None,
-            shared: Arc::new(Mutex::new(DbusSharedState::new(commands_tx.clone()))),
+            shared: Arc::new(Mutex::new(DbusSharedState::new(
+                commands_tx.clone(),
+                charger_path.clone(),
+            ))),
             registered_paths: HashSet::new(),
             charger_path,
             commands_tx,
@@ -442,6 +445,11 @@ impl DbusService {
             .await
             .map_err(|e| PhaetonError::dbus(format!("Register root BusItem failed: {}", e)))?;
         self.connection = Some(connection);
+        // Make connection available to BusItem handlers for immediate signal emission
+        {
+            let mut shared = self.shared.lock().unwrap();
+            shared.connection = Some(self.connection.as_ref().unwrap().clone());
+        }
         Ok(())
     }
 
@@ -916,14 +924,20 @@ struct DbusSharedState {
     paths: HashMap<String, serde_json::Value>,
     writable: HashSet<String>,
     commands_tx: mpsc::UnboundedSender<DriverCommand>,
+    /// Optional: connection handle for emitting signals directly from SetValue
+    connection: Option<Connection>,
+    /// Root object path for ItemsChanged
+    root_path: OwnedObjectPath,
 }
 
 impl DbusSharedState {
-    fn new(commands_tx: mpsc::UnboundedSender<DriverCommand>) -> Self {
+    fn new(commands_tx: mpsc::UnboundedSender<DriverCommand>, root_path: OwnedObjectPath) -> Self {
         Self {
             paths: HashMap::new(),
             writable: HashSet::new(),
             commands_tx,
+            connection: None,
+            root_path,
         }
     }
 }
@@ -997,38 +1011,77 @@ impl BusItem {
     /// Attempt to set the value; returns 0 on success (VeDbus-compatible)
     #[zbus(name = "SetValue")]
     async fn set_value(&self, value: OwnedValue) -> i32 {
-        let mut shared = self.shared.lock().unwrap();
-        if !shared.writable.contains(&self.path) {
-            return 1; // NOT OK
-        }
-
-        let sv = Self::owned_value_to_serde(&value);
-        // Update cache with normalization for certain paths
-        if self.path == "/StartStop" {
-            // Normalize to 0/1 integer for compatibility with Venus OS/VRM expectations
-            let v = match sv {
-                serde_json::Value::Bool(b) => {
-                    if b {
-                        1
-                    } else {
-                        0
+        // Stage 1: validate, normalize, cache, and capture connection and roots without any await
+        let (conn_opt, root_path, normalized_json, sv) = {
+            let mut shared = self.shared.lock().unwrap();
+            if !shared.writable.contains(&self.path) {
+                return 1; // NOT OK
+            }
+            let sv_local = Self::owned_value_to_serde(&value);
+            let normalized = if self.path == "/StartStop" {
+                let v = match sv_local {
+                    serde_json::Value::Bool(b) => {
+                        if b {
+                            1
+                        } else {
+                            0
+                        }
                     }
-                }
-                serde_json::Value::Number(ref n) => {
-                    if n.as_u64().unwrap_or(0) > 0 || n.as_i64().unwrap_or(0) > 0 {
-                        1
-                    } else {
-                        0
+                    serde_json::Value::Number(ref n) => {
+                        if n.as_u64().unwrap_or(0) > 0 || n.as_i64().unwrap_or(0) > 0 {
+                            1
+                        } else {
+                            0
+                        }
                     }
-                }
-                _ => 0,
+                    _ => 0,
+                };
+                serde_json::json!(v)
+            } else {
+                sv_local.clone()
             };
-            shared.paths.insert(self.path.clone(), serde_json::json!(v));
-        } else {
-            shared.paths.insert(self.path.clone(), sv.clone());
+            shared.paths.insert(self.path.clone(), normalized.clone());
+            (
+                shared.connection.clone(),
+                shared.root_path.clone(),
+                normalized,
+                sv_local,
+            )
+        };
+
+        // Emit immediate change signals to mirror VeDbus behaviour (avoids UI comm errors)
+        if let Some(conn) = conn_opt {
+            if let Ok(obj_path) = OwnedObjectPath::try_from(self.path.as_str())
+                && let Ok(item_ctx) = SignalEmitter::new(&conn, obj_path)
+            {
+                let mut changes: std::collections::HashMap<&str, OwnedValue> =
+                    std::collections::HashMap::new();
+                changes.insert("Value", BusItem::serde_to_owned_value(&normalized_json));
+                let text = format_text_value(&normalized_json);
+                if let Ok(text_ov) = OwnedValue::try_from(Value::from(text.as_str())) {
+                    changes.insert("Text", text_ov);
+                }
+                let _ = BusItem::properties_changed(&item_ctx, changes).await;
+            }
+            if let Ok(root_ctx) = SignalEmitter::new(&conn, root_path) {
+                let mut inner: std::collections::HashMap<&str, OwnedValue> =
+                    std::collections::HashMap::new();
+                inner.insert("Value", BusItem::serde_to_owned_value(&normalized_json));
+                let text = format_text_value(&normalized_json);
+                if let Ok(text_ov) = OwnedValue::try_from(Value::from(text.as_str())) {
+                    inner.insert("Text", text_ov);
+                }
+                let mut outer: std::collections::HashMap<
+                    &str,
+                    std::collections::HashMap<&str, OwnedValue>,
+                > = std::collections::HashMap::new();
+                outer.insert(self.path.as_str(), inner);
+                let _ = RootBus::items_changed(&root_ctx, outer).await;
+            }
         }
 
         // Map writable items to driver commands
+        let shared = self.shared.lock().unwrap();
         match self.path.as_str() {
             "/Mode" => {
                 let m = sv
