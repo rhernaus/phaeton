@@ -559,6 +559,19 @@ impl DbusService {
                 self.logger
                     .info(&format!("DBus set /Status = {} ({})", value, name));
             }
+            "/Mode" => {
+                let name = value
+                    .as_u64()
+                    .map(|v| match v {
+                        0 => "Manual",
+                        1 => "Auto",
+                        2 => "Scheduled",
+                        _ => "Unknown",
+                    })
+                    .unwrap_or("Unknown");
+                self.logger
+                    .info(&format!("DBus set /Mode = {} ({})", value, name));
+            }
             "/DeviceInstance" | "/ProductName" | "/ProductId" | "/FirmwareVersion" | "/Serial" => {
                 self.logger.info(&format!("DBus set {} = {}", path, value))
             }
