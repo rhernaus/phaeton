@@ -893,6 +893,43 @@ impl AlfenDriver {
         let excess = (total_pv - adjusted_consumption).max(0.0);
         Some(excess as f32)
     }
+
+    /// Compute excess PV power (W) using a provided D-Bus handle, avoiding any driver locks.
+    async fn calculate_excess_pv_power_with_dbus(
+        dbus: &crate::dbus::DbusService,
+        ev_power_w: f64,
+    ) -> Option<f32> {
+        // Helper to read f64, defaulting to 0
+        async fn get_f64(svc: &crate::dbus::DbusService, path: &str) -> f64 {
+            match svc
+                .read_remote_value("com.victronenergy.system", path)
+                .await
+            {
+                Ok(v) => v
+                    .as_f64()
+                    .or_else(|| v.as_i64().map(|x| x as f64))
+                    .or_else(|| v.as_u64().map(|x| x as f64))
+                    .unwrap_or(0.0),
+                Err(_) => 0.0,
+            }
+        }
+
+        let dc_pv = get_f64(dbus, "/Dc/Pv/Power").await;
+        let ac_pv_l1 = get_f64(dbus, "/Ac/PvOnOutput/L1/Power").await;
+        let ac_pv_l2 = get_f64(dbus, "/Ac/PvOnOutput/L2/Power").await;
+        let ac_pv_l3 = get_f64(dbus, "/Ac/PvOnOutput/L3/Power").await;
+        let total_pv = dc_pv + ac_pv_l1 + ac_pv_l2 + ac_pv_l3;
+
+        let cons_l1 = get_f64(dbus, "/Ac/Consumption/L1/Power").await;
+        let cons_l2 = get_f64(dbus, "/Ac/Consumption/L2/Power").await;
+        let cons_l3 = get_f64(dbus, "/Ac/Consumption/L3/Power").await;
+        let consumption = cons_l1 + cons_l2 + cons_l3;
+
+        // Subtract EV charger itself from consumption
+        let adjusted_consumption = (consumption - ev_power_w).max(0.0);
+        let excess = (total_pv - adjusted_consumption).max(0.0);
+        Some(excess as f32)
+    }
 }
 
 impl AlfenDriver {
@@ -1577,11 +1614,19 @@ impl AlfenDriver {
                     // Convert snapshot outside of any driver locks
                     let value =
                         serde_json::to_value(&*current_snapshot).unwrap_or(serde_json::json!({}));
-                    // Acquire dbus mutex only for the duration of the export
-                    {
+                    // Export without holding the driver lock: temporarily take the dbus handle
+                    let mut taken_dbus = {
                         let mut drv = driver_for_task.lock().await;
-                        if let Some(dbus) = &mut drv.dbus {
-                            let _ = dbus.export_snapshot(&value).await;
+                        drv.dbus.take()
+                    };
+                    if let Some(dbus) = taken_dbus.as_mut() {
+                        let _ = dbus.export_snapshot(&value).await;
+                    }
+                    // Restore the dbus handle
+                    if let Some(dbus) = taken_dbus {
+                        let mut drv = driver_for_task.lock().await;
+                        if drv.dbus.is_none() {
+                            drv.dbus = Some(dbus);
                         }
                     }
                     if rx.changed().await.is_err() {
@@ -1624,8 +1669,23 @@ impl AlfenDriver {
                                     } else { drv.last_total_power };
                                     (ev_est, within_lag)
                                 };
-                                // Call async method without holding the lock during await
-                                let excess_opt = driver_for_task.lock().await.calculate_excess_pv_power(ev_power_for_subtract).await;
+                                // Compute PV excess without holding the driver lock: temporarily take dbus
+                                let taken_dbus = {
+                                    let mut drv = driver_for_task.lock().await;
+                                    drv.dbus.take()
+                                };
+                                let excess_opt = if let Some(dbus) = taken_dbus.as_ref() {
+                                    AlfenDriver::calculate_excess_pv_power_with_dbus(dbus, ev_power_for_subtract).await
+                                } else {
+                                    None
+                                };
+                                // Restore the dbus handle
+                                if let Some(dbus) = taken_dbus {
+                                    let mut drv = driver_for_task.lock().await;
+                                    if drv.dbus.is_none() {
+                                        drv.dbus = Some(dbus);
+                                    }
+                                }
                                 if let Some(ex) = excess_opt {
                                     let mut drv = driver_for_task.lock().await;
                                     // Apply EMA smoothing
