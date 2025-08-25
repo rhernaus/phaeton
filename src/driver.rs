@@ -1523,20 +1523,25 @@ impl AlfenDriver {
                         let six_a_watts = 6.0f32 * 230.0f32 * 3.0f32;
                         let have_min = excess_pv_power_w >= six_a_watts - 200.0; // small tolerance
                         let now = std::time::Instant::now();
+                        let already_charging = drv.last_sent_current >= 5.9 || drv.last_status == 2; // Charging
 
                         if have_min {
-                            // Enough PV: clear timer and compute normally
+                            // Enough PV: clear any active timer and compute normally
                             drv.min_charge_timer_deadline = None;
-                        } else {
-                            // Not enough PV: start or maintain timer
+                        } else if already_charging {
+                            // Only when we were already charging do we start a grace timer
                             let duration = std::time::Duration::from_secs(
                                 drv.config.controls.min_charge_duration_seconds as u64,
                             );
                             if drv.min_charge_timer_deadline.is_none() {
                                 drv.min_charge_timer_deadline = Some(now + duration);
-                                drv.logger
-                                    .info("PV below 6A; starting minimum-charge countdown");
+                                drv.logger.info(
+                                    "PV below 6A during charging; starting minimum-charge countdown",
+                                );
                             }
+                        } else {
+                            // Not enough PV and we are not yet charging: do not start timer, do not up-clamp
+                            drv.min_charge_timer_deadline = None;
                         }
 
                         // While timer active, clamp effective to 6A (not below)
