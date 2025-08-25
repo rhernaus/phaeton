@@ -145,6 +145,8 @@ pub struct AlfenDriver {
     last_nonzero_excess_at: std::time::Instant,
     /// Deadline for minimum-charge grace timer when excess < 6A
     min_charge_timer_deadline: Option<std::time::Instant>,
+    /// Marker when entering Auto mode; used to suppress grace timer until first Auto charging
+    auto_mode_entered_at: Option<std::time::Instant>,
     /// Last observed Victron-esque status (0=Disc,1=Conn,2=Charging)
     last_status: u8,
 
@@ -307,6 +309,7 @@ impl AlfenDriver {
             pv_excess_ema_w: 0.0,
             last_nonzero_excess_at: std::time::Instant::now(),
             min_charge_timer_deadline: None,
+            auto_mode_entered_at: None,
             commands_rx,
             commands_tx,
             status_tx,
@@ -1527,7 +1530,9 @@ impl AlfenDriver {
                         let six_a_watts = 6.0f32 * 230.0f32 * 3.0f32;
                         let have_min = excess_pv_power_w >= six_a_watts - 200.0; // small tolerance
                         let now = std::time::Instant::now();
-                        let already_charging = drv.last_sent_current >= 5.9 || drv.last_status == 2; // Charging
+                        // Only consider "already charging" if we didn't just enter Auto mode
+                        let already_charging = drv.auto_mode_entered_at.is_none()
+                            && (drv.last_sent_current >= 5.9 || drv.last_status == 2);
 
                         if have_min {
                             // Enough PV: clear any active timer and compute normally
@@ -1561,6 +1566,10 @@ impl AlfenDriver {
                                 drv.logger
                                     .info("Minimum-charge countdown expired; stopping charging");
                             }
+                        }
+                        // Once we have seen enough PV or we actually start charging in Auto, clear entry marker
+                        if have_min || drv.last_status == 2 {
+                            drv.auto_mode_entered_at = None;
                         }
                     }
 
@@ -1902,6 +1911,11 @@ impl AlfenDriver {
             ));
         }
         self.current_mode = new_mode;
+        // If entering Auto, clear any existing grace timer and mark entry time.
+        if matches!(self.current_mode, ChargingMode::Auto) {
+            self.min_charge_timer_deadline = None;
+            self.auto_mode_entered_at = Some(std::time::Instant::now());
+        }
         if let Some(dbus) = &self.dbus {
             let _ = dbus
                 .lock()
