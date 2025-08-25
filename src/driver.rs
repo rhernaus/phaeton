@@ -540,7 +540,7 @@ impl AlfenDriver {
                     _ => (0.0, 0.0, 0.0),
                 };
 
-                let (l1_p, l2_p, l3_p, p_total) = match power_regs {
+                let (mut l1_p, mut l2_p, mut l3_p, mut p_total) = match power_regs {
                     Some(v) if v.len() >= 8 => {
                         let p1 = decode_32bit_float(&v[0..2]).unwrap_or(0.0) as f64;
                         let p2 = decode_32bit_float(&v[2..4]).unwrap_or(0.0) as f64;
@@ -551,6 +551,15 @@ impl AlfenDriver {
                     }
                     _ => (0.0, 0.0, 0.0, 0.0),
                 };
+
+                // Fallback for chargers that report 0 for per-phase or total power: approximate using V*I
+                let approx = |v: f64, i: f64| (v * i).round();
+                if l1_p.abs() < 1.0 { l1_p = approx(l1_v, l1_i); }
+                if l2_p.abs() < 1.0 { l2_p = approx(l2_v, l2_i); }
+                if l3_p.abs() < 1.0 { l3_p = approx(l3_v, l3_i); }
+                if p_total.abs() < 1.0 {
+                    p_total = l1_p + l2_p + l3_p;
+                }
 
                 let energy_wh = match energy_regs {
                     Some(v) if v.len() >= 4 => decode_64bit_float(&v[0..4]).unwrap_or(0.0),

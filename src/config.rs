@@ -306,7 +306,7 @@ impl Default for RegistersConfig {
         Self {
             voltages: 306,
             currents: 320,
-            power: 344,
+            power: 338,
             energy: 374,
             status: 1201,
             amps_config: 1210,
