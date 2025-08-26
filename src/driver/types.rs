@@ -56,30 +56,3 @@ pub enum DriverCommand {
     SetStartStop(u8),
     SetCurrent(f32),
 }
-
-/// Measurements sampled from Modbus by the worker
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub(super) struct Measurements {
-    pub l1_v: f64,
-    pub l2_v: f64,
-    pub l3_v: f64,
-    pub l1_i: f64,
-    pub l2_i: f64,
-    pub l3_i: f64,
-    pub l1_p: f64,
-    pub l2_p: f64,
-    pub l3_p: f64,
-    pub p_total: f64,
-    pub energy_kwh: f64,
-    pub status_base: i32,
-    pub duration_ms: u64,
-    pub overran: bool,
-}
-
-/// Commands to the Modbus worker
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub(super) enum ModbusCommand {
-    WriteSetCurrent(f32),
-}
