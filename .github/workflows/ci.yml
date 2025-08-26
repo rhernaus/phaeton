@@ -43,6 +43,20 @@ jobs:
       - name: Generate code coverage (lcov)
         run: cargo llvm-cov report --lcov --output-path lcov.info
 
+      - name: Enforce coverage thresholds (statements >= 25%)
+        run: |
+          set -euo pipefail
+          SUMMARY=$(cargo llvm-cov report --summary-only)
+          echo "$SUMMARY"
+          # Extract TOTAL lines coverage percentage (Lines Cover column)
+          PCT=$(echo "$SUMMARY" | awk '/^TOTAL/ {print $(NF-4)}' | tr -d '%')
+          echo "Lines coverage: ${PCT}%"
+          THRESH=25
+          if [ "${PCT%.*}" -lt "$THRESH" ]; then
+            echo "Coverage ${PCT}% is below threshold ${THRESH}%" >&2
+            exit 1
+          fi
+
       - name: Generate code coverage (html)
         run: cargo llvm-cov report --html
 
