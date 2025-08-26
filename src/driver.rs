@@ -199,7 +199,9 @@ impl AlfenDriver {
     /// Map Alfen Mode3 status string to Victron-esque numeric status
     /// 0=Disconnected, 1=Connected, 2=Charging
     pub(crate) fn map_alfen_status_to_victron(status_str: &str) -> u8 {
-        let s = status_str.trim_matches(char::from(0)).trim().to_uppercase();
+        let s = status_str
+            .trim_matches(|c: char| c == char::from(0) || c.is_whitespace())
+            .to_uppercase();
         match s.as_str() {
             "C2" | "D2" => 2,
             "B1" | "B2" | "C1" | "D1" => 1,
@@ -292,4 +294,67 @@ impl AlfenDriver {
 
 impl AlfenDriver {
     // last_poll_duration_ms moved to runtime.rs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::mpsc;
+
+    #[test]
+    fn map_status_variants() {
+        assert_eq!(AlfenDriver::map_alfen_status_to_victron("C2"), 2);
+        assert_eq!(AlfenDriver::map_alfen_status_to_victron("D2"), 2);
+        assert_eq!(AlfenDriver::map_alfen_status_to_victron("B2"), 1);
+        assert_eq!(AlfenDriver::map_alfen_status_to_victron("c1"), 1);
+        assert_eq!(AlfenDriver::map_alfen_status_to_victron("A"), 0);
+        assert_eq!(AlfenDriver::map_alfen_status_to_victron("unknown"), 0);
+        // Ensure trimming of NUL and spaces
+        assert_eq!(AlfenDriver::map_alfen_status_to_victron(" B1\0\0 "), 1);
+    }
+
+    #[tokio::test]
+    async fn set_mode_updates_state() {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let mut driver = AlfenDriver::new(rx, tx.clone()).await.unwrap();
+        assert_eq!(driver.current_mode_code(), 0);
+        driver.set_mode(1).await; // Auto
+        assert_eq!(driver.current_mode_code(), 1);
+        driver.set_mode(2).await; // Scheduled
+        assert_eq!(driver.current_mode_code(), 2);
+    }
+
+    #[tokio::test]
+    async fn start_stop_updates_state() {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let mut driver = AlfenDriver::new(rx, tx.clone()).await.unwrap();
+        assert_eq!(driver.start_stop_code(), 0);
+        driver.set_start_stop(1).await; // Enabled
+        assert_eq!(driver.start_stop_code(), 1);
+        driver.set_start_stop(0).await; // Stopped
+        assert_eq!(driver.start_stop_code(), 0);
+    }
+
+    #[tokio::test]
+    async fn intended_current_is_clamped_and_recorded() {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let mut driver = AlfenDriver::new(rx, tx.clone()).await.unwrap();
+        // Over the max_set_current should clamp
+        driver.set_intended_current(100.0).await;
+        let max_allowed = driver.config().controls.max_set_current;
+        assert!((driver.get_intended_set_current() - max_allowed).abs() < f32::EPSILON);
+        // Negative clamps to 0
+        driver.set_intended_current(-5.0).await;
+        assert!((driver.get_intended_set_current() - 0.0).abs() < f32::EPSILON);
+    }
+
+    #[tokio::test]
+    async fn subscribe_snapshot_has_initial_value() {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let driver = AlfenDriver::new(rx, tx.clone()).await.unwrap();
+        let snapshot = driver.subscribe_snapshot().borrow().clone();
+        let snap = (*snapshot).clone();
+        assert_eq!(snap.device_instance, driver.config().device_instance);
+        assert_eq!(snap.mode, driver.current_mode_code());
+    }
 }

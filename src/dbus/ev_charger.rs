@@ -190,3 +190,153 @@ impl EvCharger {
             .map_err(|_| zbus::Error::Failure("Failed to enqueue SetCurrent".into()))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::driver::DriverCommand;
+
+    fn build_test_values() -> EvChargerValues {
+        EvChargerValues {
+            device_instance: 42,
+            product_name: "Test Charger".to_string(),
+            firmware_version: "1.2.3".to_string(),
+            serial: "ABC123".to_string(),
+            product_id: 0xC024,
+            connected: 1,
+            mode: 2,
+            start_stop: 1,
+            set_current: 16.0,
+            max_current: 32.0,
+            current: 15.5,
+            ac_power: 3500.0,
+            ac_energy_forward: 12.34,
+            ac_current: 10.0,
+            phase_count: 3,
+            l1_voltage: 230.0,
+            l2_voltage: 231.0,
+            l3_voltage: 229.0,
+            l1_current: 5.1,
+            l2_current: 5.2,
+            l3_current: 5.3,
+            l1_power: 1200.0,
+            l2_power: 1150.0,
+            l3_power: 1150.0,
+            status: 2,
+            charging_time: 3600,
+            position: 1,
+            enable_display: 1,
+            auto_start: 0,
+            model: "AC22NS".to_string(),
+        }
+    }
+
+    #[test]
+    fn getters_identity_values() {
+        let (tx, _rx) = mpsc::unbounded_channel::<DriverCommand>();
+        let ev = EvCharger {
+            values: Mutex::new(build_test_values()),
+            commands_tx: tx,
+        };
+
+        assert_eq!(ev.device_instance(), 42);
+        assert_eq!(ev.product_name(), "Test Charger");
+        assert_eq!(ev.firmware_version(), "1.2.3");
+        assert_eq!(ev.serial(), "ABC123");
+        assert_eq!(ev.product_id(), 0xC024);
+        assert_eq!(ev.model(), "AC22NS");
+    }
+
+    #[test]
+    fn getters_electrical_basic() {
+        let (tx, _rx) = mpsc::unbounded_channel::<DriverCommand>();
+        let ev = EvCharger {
+            values: Mutex::new(build_test_values()),
+            commands_tx: tx,
+        };
+
+        assert_eq!(ev.connected(), 1);
+        assert_eq!(ev.mode(), 2);
+        assert_eq!(ev.start_stop(), 1);
+        assert!((ev.set_current() - 16.0).abs() < f64::EPSILON);
+        assert!((ev.max_current() - 32.0).abs() < f64::EPSILON);
+        assert!((ev.current() - 15.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn getters_electrical_voltages_and_currents() {
+        let (tx, _rx) = mpsc::unbounded_channel::<DriverCommand>();
+        let ev = EvCharger {
+            values: Mutex::new(build_test_values()),
+            commands_tx: tx,
+        };
+
+        assert_eq!(ev.ac_phase_count(), 3);
+        assert!((ev.ac_l1_voltage() - 230.0).abs() < f64::EPSILON);
+        assert!((ev.ac_l2_voltage() - 231.0).abs() < f64::EPSILON);
+        assert!((ev.ac_l3_voltage() - 229.0).abs() < f64::EPSILON);
+        assert!((ev.ac_l1_current() - 5.1).abs() < f64::EPSILON);
+        assert!((ev.ac_l2_current() - 5.2).abs() < f64::EPSILON);
+        assert!((ev.ac_l3_current() - 5.3).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn getters_electrical_power_and_energy() {
+        let (tx, _rx) = mpsc::unbounded_channel::<DriverCommand>();
+        let ev = EvCharger {
+            values: Mutex::new(build_test_values()),
+            commands_tx: tx,
+        };
+
+        assert!((ev.ac_power() - 3500.0).abs() < f64::EPSILON);
+        assert!((ev.ac_energy_total() - 12.34).abs() < f64::EPSILON);
+        assert!((ev.ac_current() - 10.0).abs() < f64::EPSILON);
+        assert!((ev.ac_l1_power() - 1200.0).abs() < f64::EPSILON);
+        assert!((ev.ac_l2_power() - 1150.0).abs() < f64::EPSILON);
+        assert!((ev.ac_l3_power() - 1150.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn getters_status_values() {
+        let (tx, _rx) = mpsc::unbounded_channel::<DriverCommand>();
+        let ev = EvCharger {
+            values: Mutex::new(build_test_values()),
+            commands_tx: tx,
+        };
+
+        assert_eq!(ev.status(), 2);
+        assert_eq!(ev.charging_time(), 3600);
+        assert_eq!(ev.position(), 1);
+        assert_eq!(ev.enable_display(), 1);
+        assert_eq!(ev.auto_start(), 0);
+    }
+
+    #[test]
+    fn setters_send_commands() {
+        let (tx, mut rx) = mpsc::unbounded_channel::<DriverCommand>();
+        let ev = EvCharger {
+            values: Mutex::new(EvChargerValues::default()),
+            commands_tx: tx,
+        };
+
+        ev.set_mode(2).unwrap();
+        ev.set_start_stop(1).unwrap();
+        ev.set_set_current(13.0).unwrap();
+
+        let msg1 = rx.try_recv().unwrap();
+        match msg1 {
+            DriverCommand::SetMode(v) => assert_eq!(v, 2),
+            _ => panic!("expected SetMode"),
+        }
+        let msg2 = rx.try_recv().unwrap();
+        match msg2 {
+            DriverCommand::SetStartStop(v) => assert_eq!(v, 1),
+            _ => panic!("expected SetStartStop"),
+        }
+        let msg3 = rx.try_recv().unwrap();
+        match msg3 {
+            DriverCommand::SetCurrent(v) => assert!((v - 13.0).abs() < f32::EPSILON),
+            _ => panic!("expected SetCurrent"),
+        }
+    }
+}

@@ -339,7 +339,7 @@ impl Default for LoggingConfig {
     fn default() -> Self {
         Self {
             level: "INFO".to_string(),
-            file: "/var/log/phaeton.log".to_string(),
+            file: "/tmp/phaeton.log".to_string(),
             format: "structured".to_string(),
             max_file_size_mb: 10,
             backup_count: 5,

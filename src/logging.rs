@@ -6,6 +6,7 @@
 use crate::config::LoggingConfig;
 use crate::error::{PhaetonError, Result};
 use once_cell::sync::OnceCell;
+use std::sync::Once;
 use tracing::{Level, debug, error, info, trace, warn};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_appender::{non_blocking, rolling};
@@ -13,76 +14,88 @@ use tracing_subscriber::{EnvFilter, Layer, fmt, layer::SubscriberExt, util::Subs
 
 // Keep the non-blocking worker guard alive for the entire process lifetime
 static LOG_GUARD: OnceCell<WorkerGuard> = OnceCell::new();
+static INIT_ONCE: Once = Once::new();
+static INIT_ERROR: OnceCell<String> = OnceCell::new();
 
 /// Initialize logging system based on configuration
 pub fn init_logging(config: &LoggingConfig) -> Result<()> {
-    // If already initialized, do nothing (prevents dropping existing guard/appender)
-    if LOG_GUARD.get().is_some() {
-        return Ok(());
+    INIT_ONCE.call_once(|| {
+        let init_result = (|| -> Result<()> {
+            // Parse log level
+            let level = parse_log_level(&config.level)?;
+
+            // Create environment filter
+            let filter = EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| format!("phaeton={},tokio_modbus=warn", level).into());
+
+            // Set up log file appender with rotation
+            let file_appender = rolling::Builder::new()
+                .rotation(rolling::Rotation::DAILY)
+                .filename_prefix("phaeton")
+                .filename_suffix("log")
+                .max_log_files(config.backup_count as usize)
+                .build(&config.file)
+                .map_err(|e| {
+                    PhaetonError::io(format!("Failed to create log file appender: {}", e))
+                })?;
+
+            let (non_blocking_appender, guard) = non_blocking(file_appender);
+            // Keep the guard alive for the entire process lifetime to ensure logs are written
+            let _ = LOG_GUARD.set(guard);
+
+            // Create registry with multiple layers
+            let registry = tracing_subscriber::registry().with(filter);
+
+            // Add file logging layer
+            let file_layer = fmt::layer()
+                .with_writer(non_blocking_appender)
+                .with_target(false)
+                .with_thread_ids(false)
+                .with_file(false);
+
+            let file_layer = if config.json_format {
+                file_layer.json().boxed()
+            } else {
+                file_layer.boxed()
+            };
+
+            // Start with file logging
+            let subscriber = registry.with(file_layer);
+
+            // Optionally add console logging and initialize
+            if config.console_output {
+                let console_layer = fmt::layer()
+                    .with_writer(std::io::stdout)
+                    .with_target(false)
+                    .with_thread_ids(false)
+                    .with_file(false);
+
+                let console_layer = if config.json_format {
+                    console_layer.json().boxed()
+                } else {
+                    console_layer.boxed()
+                };
+
+                subscriber.with(console_layer).init();
+            } else {
+                subscriber.init();
+            }
+
+            info!(
+                "Logging initialized - level: {}, file: {}",
+                level, config.file
+            );
+            Ok(())
+        })();
+
+        if let Err(e) = init_result {
+            let _ = INIT_ERROR.set(e.to_string());
+        }
+    });
+
+    if let Some(err) = INIT_ERROR.get() {
+        return Err(PhaetonError::config(err.clone()));
     }
-    // Parse log level
-    let level = parse_log_level(&config.level)?;
-
-    // Create environment filter
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| format!("phaeton={},tokio_modbus=warn", level).into());
-
-    // Set up log file appender with rotation
-    let file_appender = rolling::Builder::new()
-        .rotation(rolling::Rotation::DAILY)
-        .filename_prefix("phaeton")
-        .filename_suffix("log")
-        .max_log_files(config.backup_count as usize)
-        .build(&config.file)
-        .map_err(|e| PhaetonError::io(format!("Failed to create log file appender: {}", e)))?;
-
-    let (non_blocking_appender, guard) = non_blocking(file_appender);
-    // Keep the guard alive for the entire process lifetime to ensure logs are written
-    let _ = LOG_GUARD.set(guard);
-
-    // Create registry with multiple layers
-    let registry = tracing_subscriber::registry().with(filter);
-
-    // Add file logging layer
-    let file_layer = fmt::layer()
-        .with_writer(non_blocking_appender)
-        .with_target(false)
-        .with_thread_ids(false)
-        .with_file(false);
-
-    let file_layer = if config.json_format {
-        file_layer.json().boxed()
-    } else {
-        file_layer.boxed()
-    };
-
-    // Start with file logging
-    let subscriber = registry.with(file_layer);
-
-    // Optionally add console logging and initialize
-    if config.console_output {
-        let console_layer = fmt::layer()
-            .with_writer(std::io::stdout)
-            .with_target(false)
-            .with_thread_ids(false)
-            .with_file(false);
-
-        let console_layer = if config.json_format {
-            console_layer.json().boxed()
-        } else {
-            console_layer.boxed()
-        };
-
-        subscriber.with(console_layer).init();
-    } else {
-        subscriber.init();
-    }
-
-    info!(
-        "Logging initialized - level: {}, file: {}",
-        level, config.file
-    );
-
     Ok(())
 }
 
