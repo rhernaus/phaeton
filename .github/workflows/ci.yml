@@ -27,7 +27,10 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Lint (clippy)
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --all-targets --all-features -- -D warnings -W clippy::cognitive_complexity
+
+      - name: Install cargo-nextest
+        run: cargo install cargo-nextest --locked
 
       - name: Install llvm-tools and cargo-llvm-cov
         run: |
@@ -37,14 +40,17 @@ jobs:
       - name: Clean coverage artifacts
         run: cargo llvm-cov clean --workspace
 
-      - name: Run coverage tests (no report)
-        run: cargo llvm-cov --workspace --all-features --no-report
+      - name: Run coverage tests (nextest, no report)
+        run: cargo llvm-cov nextest --workspace --all-features --no-report
 
       - name: Generate code coverage (lcov)
         run: cargo llvm-cov report --lcov --output-path lcov.info
 
       - name: Generate code coverage (html)
         run: cargo llvm-cov report --html
+
+      - name: Enforce coverage threshold
+        run: cargo llvm-cov report --fail-under-lines 56
 
       - name: Upload coverage artifacts
         uses: actions/upload-artifact@v4
@@ -53,6 +59,76 @@ jobs:
           path: |
             lcov.info
             target/llvm-cov/html
+
+  deps:
+    name: Dependency Hygiene
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-outdated
+        run: cargo install cargo-outdated --locked
+
+      - name: Check outdated dependencies (non-fatal)
+        run: cargo outdated --workspace --exit-code 0
+
+  security:
+    name: Security and Supply Chain
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-deny, cargo-geiger, cargo-supply-chain
+        run: |
+          cargo install cargo-deny --locked
+
+      - name: Run cargo-deny (config)
+        run: cargo deny check
+
+  docs:
+    name: Docs Quality
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build documentation (treat warnings as errors)
+        run: cargo doc --no-deps --all-features
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+
+  budgets:
+    name: Budgets
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Verify budget script exists
+        run: test -f scripts/check-budgets.sh
+
+      - name: Run budget checks (default budgets)
+        run: bash scripts/check-budgets.sh
 
   audit:
     name: Security Audit
@@ -95,7 +171,7 @@ jobs:
     name: Cross-compilation (${{ matrix.target }}, ${{ matrix.friendly }}, ${{ matrix.gcc_pkg }}, ${{ matrix.apt_arch }})
     runs-on: ubuntu-24.04
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           - target: armv7-unknown-linux-gnueabihf

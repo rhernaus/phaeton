@@ -205,14 +205,6 @@ impl From<chrono::ParseError> for PhaetonError {
     }
 }
 
-impl From<git2::Error> for PhaetonError {
-    fn from(err: git2::Error) -> Self {
-        PhaetonError::Update {
-            message: err.to_string(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -224,6 +224,7 @@ pub struct TibberConfig {
 
 /// Control and safety limits
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
 pub struct ControlsConfig {
     /// Tolerance for current verification
     pub current_tolerance: f32,
@@ -245,6 +246,11 @@ pub struct ControlsConfig {
 
     /// Max settable current
     pub max_set_current: f32,
+
+    /// Minimum non-zero current to apply in automatic mode. If the computed
+    /// current is below this threshold, we set 0 A to avoid oscillating with
+    /// sub-minimum setpoints. Typical EVSE minimum is 6 A.
+    pub min_set_current: f32,
 
     /// Min charge duration in seconds
     pub min_charge_duration_seconds: u32,
@@ -338,7 +344,7 @@ impl Default for LoggingConfig {
     fn default() -> Self {
         Self {
             level: "INFO".to_string(),
-            file: "/var/log/phaeton.log".to_string(),
+            file: "/tmp/phaeton.log".to_string(),
             format: "structured".to_string(),
             max_file_size_mb: 10,
             backup_count: 5,
@@ -373,6 +379,7 @@ impl Default for ControlsConfig {
             max_retries: 3,
             watchdog_interval_seconds: 30,
             max_set_current: 64.0,
+            min_set_current: 6.0,
             min_charge_duration_seconds: 300,
             current_update_interval: 30000,
             verify_delay: 100,

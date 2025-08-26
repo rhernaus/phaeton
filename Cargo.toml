@@ -1,6 +1,6 @@
 [package]
 name = "phaeton"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
 description = "Phaeton - EV Charger Driver for Victron Venus OS"
 authors = ["Your Name <your.email@example.com>"]
@@ -28,7 +28,7 @@ tower-http = { version = "0.6", features = ["cors", "trace", "fs", "compression-
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
 serde_json = "1.0"
-schemars = { version = "0.8", features = ["chrono", "url", "uuid"] }
+schemars = "1.0.4"
 utoipa = { version = "5.4.0", features = ["axum_extras", "chrono", "uuid"] }
 utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
 
@@ -43,8 +43,8 @@ tracing-appender = "0.2"
 # D-Bus integration for Venus OS
 zbus = { version = "5.10", default-features = false, features = ["tokio"] }
 
-# HTTP client for external APIs
-reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+# HTTP client for external APIs (Rustls only to avoid OpenSSL)
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 # Date and time handling
 chrono = { version = "0.4", features = ["serde"] }
@@ -66,9 +66,6 @@ once_cell = "1.19"
 fs-err = "3.1"
 directories = "6.0"
 
-# Git operations for self-updates
-# Use vendored libgit2 and OpenSSL to avoid needing system -dev packages in CI/cross builds
-git2 = { version = "0.20", default-features = false, features = ["vendored-libgit2", "vendored-openssl"] }
 
 # Environment and process management
 dotenvy = "0.15"
@@ -122,3 +119,16 @@ assets = [
     ["README.md", "usr/share/doc/phaeton/README.md", "644"],
     ["docs/*", "usr/share/doc/phaeton/", "644"],
 ]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused = { level = "deny", priority = -1 }
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+dbg_macro = "deny"
+unwrap_used = "deny"
+expect_used = "deny"

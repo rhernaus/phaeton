@@ -63,6 +63,8 @@ controls:
   max_retries: 3
   watchdog_interval_seconds: 30
   max_set_current: 64.0
+  # Minimum EVSE current in amps; below this we either send 0 A or 6 A depending on mode
+  min_set_current: 6.0
   min_charge_duration_seconds: 300
   current_update_interval: 30000
   verify_delay: 100

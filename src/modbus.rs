@@ -449,6 +449,7 @@ impl ModbusConnectionManager {
 mod tests {
     use super::*;
     use crate::config::ModbusConfig;
+    use crate::error::PhaetonError;
 
     #[test]
     fn test_decode_32bit_float() {
@@ -491,5 +492,24 @@ mod tests {
         let config = ModbusConfig::default();
         let client = ModbusClient::new(&config);
         assert!(!client.is_connected());
+    }
+
+    #[test]
+    fn test_is_connection_error() {
+        assert!(ModbusConnectionManager::is_connection_error(
+            &PhaetonError::modbus("connection reset by peer")
+        ));
+        assert!(ModbusConnectionManager::is_connection_error(
+            &PhaetonError::modbus("Connection refused")
+        ));
+        assert!(ModbusConnectionManager::is_connection_error(
+            &PhaetonError::modbus("timeout waiting")
+        ));
+        assert!(ModbusConnectionManager::is_connection_error(
+            &PhaetonError::timeout("timed out")
+        ));
+        assert!(!ModbusConnectionManager::is_connection_error(
+            &PhaetonError::modbus("CRC error")
+        ));
     }
 }
