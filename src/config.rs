@@ -247,6 +247,11 @@ pub struct ControlsConfig {
     /// Max settable current
     pub max_set_current: f32,
 
+    /// Minimum non-zero current to apply in automatic mode. If the computed
+    /// current is below this threshold, we set 0 A to avoid oscillating with
+    /// sub-minimum setpoints. Typical EVSE minimum is 6 A.
+    pub min_set_current: f32,
+
     /// Min charge duration in seconds
     pub min_charge_duration_seconds: u32,
 
@@ -374,6 +379,7 @@ impl Default for ControlsConfig {
             max_retries: 3,
             watchdog_interval_seconds: 30,
             max_set_current: 64.0,
+            min_set_current: 6.0,
             min_charge_duration_seconds: 300,
             current_update_interval: 30000,
             verify_delay: 100,

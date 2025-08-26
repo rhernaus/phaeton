@@ -169,6 +169,102 @@ impl BusItem {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dbus::shared::DbusSharedState;
+    use tokio::sync::mpsc;
+
+    fn make_item(path: &str) -> BusItem {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let root = OwnedObjectPath::try_from("/").unwrap();
+        let shared = Arc::new(Mutex::new(DbusSharedState::new(tx, root)));
+        BusItem::new(path.to_string(), shared)
+    }
+
+    #[test]
+    fn normalize_start_stop_various_inputs() {
+        let item = make_item("/StartStop");
+        assert_eq!(
+            BusItem::normalize_start_stop(&serde_json::json!(true)),
+            serde_json::json!(1)
+        );
+        assert_eq!(
+            BusItem::normalize_start_stop(&serde_json::json!(0)),
+            serde_json::json!(0)
+        );
+        assert_eq!(
+            BusItem::normalize_start_stop(&serde_json::json!("On")),
+            serde_json::json!(1)
+        );
+        assert_eq!(
+            BusItem::normalize_start_stop(&serde_json::json!("disabled")),
+            serde_json::json!(0)
+        );
+        // Ensure path-based normalization uses the right function
+        assert_eq!(
+            item.normalize_value_for_path(&serde_json::json!("true")),
+            serde_json::json!(1)
+        );
+    }
+
+    #[test]
+    fn normalize_mode_various_inputs() {
+        let item = make_item("/Mode");
+        assert_eq!(
+            BusItem::normalize_mode(&serde_json::json!(2)),
+            serde_json::json!(2)
+        );
+        assert_eq!(
+            BusItem::normalize_mode(&serde_json::json!("manual")),
+            serde_json::json!(0)
+        );
+        assert_eq!(
+            BusItem::normalize_mode(&serde_json::json!("Auto")),
+            serde_json::json!(1)
+        );
+        assert_eq!(
+            BusItem::normalize_mode(&serde_json::json!("scheduled")),
+            serde_json::json!(2)
+        );
+        assert_eq!(
+            item.normalize_value_for_path(&serde_json::json!("schedule")),
+            serde_json::json!(2)
+        );
+    }
+
+    #[test]
+    fn owned_value_conversions_roundtrip() {
+        let j = serde_json::json!({"a":1});
+        // Complex types fallback to numeric 0 per implementation
+        let ov = BusItem::serde_to_owned_value(&j);
+        let back = BusItem::owned_value_to_serde(&ov);
+        assert_eq!(back, serde_json::json!(0));
+
+        // Primitives
+        let ov_b = BusItem::serde_to_owned_value(&serde_json::json!(true));
+        assert_eq!(
+            BusItem::owned_value_to_serde(&ov_b),
+            serde_json::json!(true)
+        );
+
+        let ov_i = BusItem::serde_to_owned_value(&serde_json::json!(-5));
+        assert_eq!(BusItem::owned_value_to_serde(&ov_i), serde_json::json!(-5));
+
+        let ov_u = BusItem::serde_to_owned_value(&serde_json::json!(5u64));
+        assert_eq!(
+            BusItem::owned_value_to_serde(&ov_u),
+            serde_json::json!(5u64)
+        );
+
+        let ov_f = BusItem::serde_to_owned_value(&serde_json::json!(std::f64::consts::PI));
+        assert_eq!(
+            BusItem::owned_value_to_serde(&ov_f),
+            serde_json::json!(std::f64::consts::PI)
+        );
+    }
+}
+
 #[zbus::interface(name = "com.victronenergy.BusItem")]
 impl BusItem {
     #[zbus(name = "GetValue")]

@@ -9,3 +9,24 @@ impl AlfenDriver {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::mpsc;
+
+    #[tokio::test]
+    async fn handle_command_dispatches() {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let mut d = AlfenDriver::new(rx, tx).await.unwrap();
+        assert_eq!(d.current_mode_code(), 0);
+        d.handle_command(DriverCommand::SetMode(1)).await;
+        assert_eq!(d.current_mode_code(), 1);
+
+        d.handle_command(DriverCommand::SetStartStop(1)).await;
+        assert_eq!(d.start_stop_code(), 1);
+
+        d.handle_command(DriverCommand::SetCurrent(5.5)).await;
+        assert!((d.get_intended_set_current() - 5.5).abs() < f32::EPSILON);
+    }
+}

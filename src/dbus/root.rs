@@ -48,6 +48,49 @@ impl RootBus {
     ) -> zbus::Result<()>;
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::mpsc;
+    use zbus::zvariant::OwnedObjectPath;
+
+    fn make_shared_with_paths(paths: &[(&str, serde_json::Value)]) -> Arc<Mutex<DbusSharedState>> {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let root = OwnedObjectPath::try_from("/").unwrap();
+        let shared = Arc::new(Mutex::new(DbusSharedState::new(tx, root)));
+        {
+            let mut s = shared.lock().unwrap();
+            for (k, v) in paths {
+                s.paths.insert((*k).to_string(), v.clone());
+            }
+        }
+        shared
+    }
+
+    #[test]
+    fn collect_subtree_maps_values_and_text() {
+        let shared = make_shared_with_paths(&[
+            ("/Ac/Power", serde_json::json!(123.456)),
+            ("/Ac/Current", serde_json::json!(6.0)),
+            ("/Other", serde_json::json!(1)),
+        ]);
+
+        let root = RootBus {
+            shared: Arc::clone(&shared),
+        };
+        let map_val = root.collect_subtree_map("/Ac", false);
+        assert!(map_val.contains_key("Power"));
+        assert!(map_val.contains_key("Current"));
+        assert!(!map_val.contains_key("Other"));
+
+        let map_text = root.collect_subtree_map("/Ac", true);
+        // Values are formatted to strings in text mode
+        let ov = map_text.get("Power").unwrap();
+        // OwnedValue cannot be directly compared to JSON; ensure debug formatting works
+        let _s = format!("{:?}", ov);
+    }
+}
+
 impl RootBus {
     fn collect_subtree_map(&self, prefix: &str, as_text: bool) -> HashMap<String, OwnedValue> {
         let shared = self.shared.lock().unwrap();

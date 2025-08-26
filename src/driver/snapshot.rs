@@ -109,3 +109,41 @@ impl super::AlfenDriver {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use tokio::sync::mpsc;
+
+    #[tokio::test]
+    async fn build_typed_snapshot_populates_core_fields() {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let mut d = crate::driver::AlfenDriver::new(rx, tx).await.unwrap();
+
+        // Seed some last measurements
+        d.last_l1_voltage = 230.0;
+        d.last_l2_voltage = 231.0;
+        d.last_l3_voltage = 229.0;
+        d.last_l1_current = 5.0;
+        d.last_l2_current = 6.0;
+        d.last_l3_current = 7.0;
+        d.last_l1_power = 1100.0;
+        d.last_l2_power = 1200.0;
+        d.last_l3_power = 1300.0;
+        d.last_total_power = 3600.0;
+        d.last_energy_kwh = 12.345;
+        d.last_sent_current = 6.5;
+        d.product_name = Some("Alfen EV Charger".to_string());
+        d.firmware_version = Some("1.2.3".to_string());
+        d.serial = Some("ABC".to_string());
+
+        let snap = d.build_typed_snapshot(Some(10));
+        assert_eq!(snap.device_instance, d.config().device_instance);
+        assert_eq!(snap.station_max_current, d.get_station_max_current());
+        assert!((snap.ac_power - 3600.0).abs() < 0.001);
+        assert!(snap.active_phases >= 1);
+        assert_eq!(snap.poll_duration_ms, Some(10));
+        assert_eq!(snap.product_name, Some("Alfen EV Charger".to_string()));
+        assert_eq!(snap.firmware, Some("1.2.3".to_string()));
+        assert_eq!(snap.serial, Some("ABC".to_string()));
+    }
+}

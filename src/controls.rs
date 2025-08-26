@@ -76,9 +76,15 @@ impl ChargingControls {
                 let excess_watts = solar_power.unwrap_or(0.0).max(0.0);
                 let nominal_voltage = 230.0f32;
                 let phases = 3.0f32; // TODO: detect active phases from charger
-                let amps = excess_watts / (phases * nominal_voltage);
-                // Ignore very small currents (<0.1 A)
-                let amps = if amps < 0.1 { 0.0 } else { amps };
+                let amps_raw = excess_watts / (phases * nominal_voltage);
+                // Below EVSE minimum current we should not oscillate with tiny setpoints.
+                // If below min_set_current, clamp to exactly 0.0 unless already above threshold.
+                let min_current = config.controls.min_set_current.max(0.0);
+                let amps = if amps_raw < min_current {
+                    0.0
+                } else {
+                    amps_raw
+                };
                 amps.min(station_max_current)
             }
             ChargingMode::Scheduled => {
@@ -114,8 +120,13 @@ impl ChargingControls {
                 let excess_watts = solar_power.unwrap_or(0.0).max(0.0);
                 let nominal_voltage = 230.0f32;
                 let phases = 3.0f32;
-                let amps = excess_watts / (phases * nominal_voltage);
-                let amps = if amps < 0.1 { 0.0 } else { amps };
+                let amps_raw = excess_watts / (phases * nominal_voltage);
+                let min_current = config.controls.min_set_current.max(0.0);
+                let amps = if amps_raw < min_current {
+                    0.0
+                } else {
+                    amps_raw
+                };
                 amps.min(station_max_current)
             }
             ChargingMode::Scheduled => {

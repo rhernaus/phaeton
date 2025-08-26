@@ -116,6 +116,7 @@ jobs:
         with:
           pattern: phaeton-*
           path: artifacts
+          merge-multiple: false
 
       - name: Checkout repository for packaging assets
         uses: actions/checkout@v5

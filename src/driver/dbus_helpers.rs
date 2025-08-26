@@ -215,3 +215,62 @@ impl super::AlfenDriver {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::AlfenDriver;
+    use tokio::sync::mpsc;
+
+    #[tokio::test]
+    async fn get_db_value_and_cache_snapshot() {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let mut d = AlfenDriver::new(rx, tx.clone()).await.unwrap();
+
+        // Prepare a D-Bus service and attach
+        let svc = crate::dbus::DbusService::new(d.config.device_instance, tx)
+            .await
+            .unwrap();
+        {
+            let mut shared = svc.shared.lock().unwrap();
+            shared.paths.insert(
+                "/ProductName".to_string(),
+                serde_json::json!("Test Charger"),
+            );
+            shared
+                .paths
+                .insert("/Ac/Power".to_string(), serde_json::json!(1234.0));
+            shared
+                .paths
+                .insert("/SetCurrent".to_string(), serde_json::json!(6.5));
+        }
+        d.dbus = Some(std::sync::Arc::new(tokio::sync::Mutex::new(svc)));
+
+        // get_db_value should return inserted values
+        let pname = d.get_db_value("/ProductName");
+        assert_eq!(pname, Some(serde_json::json!("Test Charger")));
+
+        // get_dbus_cache_snapshot should include only known keys that exist
+        let snap = d.get_dbus_cache_snapshot();
+        let obj = snap.as_object().unwrap();
+        assert_eq!(
+            obj.get("/ProductName").unwrap(),
+            &serde_json::json!("Test Charger")
+        );
+        assert_eq!(obj.get("/Ac/Power").unwrap(), &serde_json::json!(1234.0));
+        assert_eq!(obj.get("/SetCurrent").unwrap(), &serde_json::json!(6.5));
+        // Unset key should be absent
+        assert!(obj.get("/Serial").is_none());
+    }
+
+    #[tokio::test]
+    async fn subscribe_status_receives_messages() {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let d = AlfenDriver::new(rx, tx).await.unwrap();
+
+        let mut rx_status = d.subscribe_status();
+        // Send a message via the driver's broadcast channel
+        let _ = d.status_tx.send("hello".to_string());
+        let msg = rx_status.recv().await.unwrap();
+        assert_eq!(msg, "hello");
+    }
+}
