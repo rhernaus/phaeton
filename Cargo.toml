@@ -122,3 +122,16 @@ assets = [
     ["README.md", "usr/share/doc/phaeton/README.md", "644"],
     ["docs/*", "usr/share/doc/phaeton/", "644"],
 ]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused = { level = "deny", priority = -1 }
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+dbg_macro = "deny"
+unwrap_used = "deny"
+expect_used = "deny"

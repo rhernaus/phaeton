@@ -1,0 +1,8 @@
+[alias]
+ci = "fmt --all -- --check && clippy --all-targets --all-features -- -D warnings && test"
+cov = "llvm-cov --workspace --all-features --fail-under-lines 56"
+udeps = "+nightly udeps --all-targets --all-features"
+
+[term]
+color = "always"
+

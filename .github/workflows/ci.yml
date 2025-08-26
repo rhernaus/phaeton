@@ -29,6 +29,9 @@ jobs:
       - name: Lint (clippy)
         run: cargo clippy --all-targets --all-features -- -D warnings -W clippy::cognitive_complexity
 
+      - name: Install cargo-nextest
+        run: cargo install cargo-nextest --locked
+
       - name: Install llvm-tools and cargo-llvm-cov
         run: |
           rustup component add llvm-tools-preview
@@ -37,14 +40,17 @@ jobs:
       - name: Clean coverage artifacts
         run: cargo llvm-cov clean --workspace
 
-      - name: Run coverage tests (no report)
-        run: cargo llvm-cov --workspace --all-features --no-report
+      - name: Run coverage tests (nextest, no report)
+        run: cargo llvm-cov nextest --workspace --all-features --no-report
 
       - name: Generate code coverage (lcov)
         run: cargo llvm-cov report --lcov --output-path lcov.info
 
       - name: Generate code coverage (html)
         run: cargo llvm-cov report --html
+
+      - name: Enforce coverage threshold
+        run: cargo llvm-cov report --fail-under-lines 56
 
       - name: Upload coverage artifacts
         uses: actions/upload-artifact@v4
@@ -53,6 +59,147 @@ jobs:
           path: |
             lcov.info
             target/llvm-cov/html
+
+  deps:
+    name: Dependency Hygiene
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-outdated
+        run: cargo install cargo-outdated --locked
+
+      - name: Check outdated dependencies (non-fatal)
+        run: cargo outdated --workspace --all-features --exit-code 0
+
+      - name: Install Rust (nightly) for udeps
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-udeps
+        run: cargo install cargo-udeps --locked
+
+      - name: Check unused dependencies (non-fatal)
+        run: cargo +nightly udeps --all-targets --all-features
+        continue-on-error: true
+
+  security:
+    name: Security and Supply Chain
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-deny, cargo-geiger, cargo-supply-chain
+        run: |
+          cargo install cargo-deny --locked
+          cargo install cargo-geiger --locked
+          cargo install cargo-supply-chain --locked
+
+      - name: Run cargo-deny (config)
+        run: cargo deny check
+
+      - name: Run cargo-deny (bans, duplicates, sources)
+        run: cargo deny check bans duplicates sources
+        continue-on-error: true
+
+      - name: Scan for unsafe code with cargo-geiger (non-fatal)
+        run: cargo geiger --all-features
+        continue-on-error: true
+
+      - name: Update supply-chain metadata (non-fatal)
+        run: cargo supply-chain update
+        continue-on-error: true
+
+  docs:
+    name: Docs Quality
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build documentation (treat warnings as errors)
+        run: cargo doc --no-deps --all-features
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+
+      - name: Install cargo-deadlinks and cargo-spellcheck
+        run: |
+          cargo install cargo-deadlinks --locked
+          cargo install cargo-spellcheck --locked
+
+      - name: Check for broken doc links (deadlinks)
+        run: cargo deadlinks --dir target/doc
+
+      - name: Spellcheck docs/comments (non-fatal)
+        run: cargo spellcheck
+        continue-on-error: true
+
+  semver:
+    name: Semver Checks
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-semver-checks
+        run: cargo install cargo-semver-checks --locked
+
+      - name: Run cargo-semver-checks (non-fatal)
+        run: cargo semver-checks check-release
+        continue-on-error: true
+
+  dist-release:
+    name: Distribution & Release Checks
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-dist and cargo-release
+        run: |
+          cargo install cargo-dist --locked
+          cargo install cargo-release --locked
+
+      - name: Validate cargo-dist build (non-fatal)
+        run: cargo dist build
+        continue-on-error: true
+
+      - name: Validate release configuration (non-fatal)
+        run: cargo release check
+        continue-on-error: true
 
   budgets:
     name: Budgets

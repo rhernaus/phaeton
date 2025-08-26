@@ -6,6 +6,7 @@
 use crate::config::LoggingConfig;
 use crate::error::{PhaetonError, Result};
 use once_cell::sync::OnceCell;
+use std::path::Path;
 use std::sync::Once;
 use tracing::{Level, debug, error, info, trace, warn};
 use tracing_appender::non_blocking::WorkerGuard;
@@ -18,15 +19,40 @@ static INIT_ONCE: Once = Once::new();
 static INIT_ERROR: OnceCell<String> = OnceCell::new();
 
 /// Initialize logging system based on configuration
+#[allow(clippy::cognitive_complexity)]
 pub fn init_logging(config: &LoggingConfig) -> Result<()> {
     INIT_ONCE.call_once(|| {
         let init_result = (|| -> Result<()> {
-            // Parse log level
             let level = parse_log_level(&config.level)?;
-
-            // Create environment filter
             let filter = EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| format!("phaeton={},tokio_modbus=warn", level).into());
+
+            // In tests or when explicitly disabled, use console-only logging and return early
+            if cfg!(test) || std::env::var_os("PHAETON_DISABLE_FILE_LOG").is_some() {
+                let console_layer = {
+                    let layer = fmt::layer()
+                        .with_writer(std::io::stdout)
+                        .with_target(false)
+                        .with_thread_ids(false)
+                        .with_file(false);
+                    if config.json_format {
+                        layer.json().boxed()
+                    } else {
+                        layer.boxed()
+                    }
+                };
+
+                tracing_subscriber::registry()
+                    .with(filter)
+                    .with(console_layer)
+                    .init();
+
+                info!("Logging initialized - level: {}, console-only", level);
+                return Ok(());
+            }
+
+            // Normal path: set up file logging (with optional console)
+            let registry = tracing_subscriber::registry().with(filter);
 
             // Set up log file appender with rotation
             let file_appender = rolling::Builder::new()
@@ -34,48 +60,50 @@ pub fn init_logging(config: &LoggingConfig) -> Result<()> {
                 .filename_prefix("phaeton")
                 .filename_suffix("log")
                 .max_log_files(config.backup_count as usize)
-                .build(&config.file)
+                .build({
+                    // If config.file is a file path, use its parent dir; otherwise treat as dir
+                    let p = Path::new(&config.file);
+                    if p.extension().is_some() {
+                        p.parent().unwrap_or(p)
+                    } else {
+                        p
+                    }
+                })
                 .map_err(|e| {
                     PhaetonError::io(format!("Failed to create log file appender: {}", e))
                 })?;
 
             let (non_blocking_appender, guard) = non_blocking(file_appender);
-            // Keep the guard alive for the entire process lifetime to ensure logs are written
             let _ = LOG_GUARD.set(guard);
 
-            // Create registry with multiple layers
-            let registry = tracing_subscriber::registry().with(filter);
-
-            // Add file logging layer
-            let file_layer = fmt::layer()
-                .with_writer(non_blocking_appender)
-                .with_target(false)
-                .with_thread_ids(false)
-                .with_file(false);
-
-            let file_layer = if config.json_format {
-                file_layer.json().boxed()
-            } else {
-                file_layer.boxed()
-            };
-
-            // Start with file logging
-            let subscriber = registry.with(file_layer);
-
-            // Optionally add console logging and initialize
-            if config.console_output {
-                let console_layer = fmt::layer()
-                    .with_writer(std::io::stdout)
+            let file_layer = {
+                let layer = fmt::layer()
+                    .with_writer(non_blocking_appender)
                     .with_target(false)
                     .with_thread_ids(false)
                     .with_file(false);
-
-                let console_layer = if config.json_format {
-                    console_layer.json().boxed()
+                if config.json_format {
+                    layer.json().boxed()
                 } else {
-                    console_layer.boxed()
-                };
+                    layer.boxed()
+                }
+            };
 
+            let subscriber = registry.with(file_layer);
+
+            if config.console_output {
+                let console_layer = {
+                    let layer = fmt::layer()
+                        .with_writer(std::io::stdout)
+                        .with_target(false)
+                        .with_thread_ids(false)
+                        .with_file(false);
+                    if config.json_format {
+                        layer.json().boxed()
+                    } else {
+                        layer.boxed()
+                    }
+                };
                 subscriber.with(console_layer).init();
             } else {
                 subscriber.init();
