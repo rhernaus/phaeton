@@ -207,6 +207,7 @@ jobs:
   fuzz-build:
     name: Fuzz targets build (nightly)
     runs-on: ubuntu-24.04
+    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -223,12 +224,11 @@ jobs:
           if [ ! -d fuzz ]; then cargo fuzz init; fi
       - name: Build fuzz targets
         run: cargo fuzz build
-      - name: Mark job non-blocking
-        continue-on-error: true
 
   mutants-dry-run:
     name: Mutation testing (dry-run)
     runs-on: ubuntu-24.04
+    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -240,12 +240,11 @@ jobs:
         run: cargo install cargo-mutants --locked
       - name: Dry run (list mutants)
         run: cargo mutants --list --no-run
-      - name: Mark job non-blocking
-        continue-on-error: true
 
   public-api:
     name: Public API diff
     runs-on: ubuntu-24.04
+    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -262,12 +261,11 @@ jobs:
           cargo install cargo-public-api --locked
       - name: Show public API
         run: cargo public-api --simplified
-      - name: Mark job non-blocking
-        continue-on-error: true
 
   semver-checks:
     name: Semver checks (library API)
     runs-on: ubuntu-24.04
+    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -289,5 +287,3 @@ jobs:
           else
             echo "No tags found; skipping semver baseline"
           fi
-      - name: Mark job non-blocking
-        continue-on-error: true
