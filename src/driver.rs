@@ -180,7 +180,7 @@ impl AlfenDriver {
 impl AlfenDriver {
     // refresh_charger_identity moved to dbus_helpers.rs
 
-    /// Run the driver using a shared Arc<Mutex<AlfenDriver>> without holding the lock across the entire loop.
+    /// Run the driver using a shared `Arc<Mutex<AlfenDriver>>` without holding the lock across the entire loop.
     ///
     /// This avoids starving other components (e.g., web server) that need brief access to the driver state.
     pub async fn run_on_arc(driver: Arc<tokio::sync::Mutex<AlfenDriver>>) -> Result<()> {

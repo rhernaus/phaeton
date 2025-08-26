@@ -19,100 +19,18 @@ static INIT_ONCE: Once = Once::new();
 static INIT_ERROR: OnceCell<String> = OnceCell::new();
 
 /// Initialize logging system based on configuration
-#[allow(clippy::cognitive_complexity)]
 pub fn init_logging(config: &LoggingConfig) -> Result<()> {
     INIT_ONCE.call_once(|| {
         let init_result = (|| -> Result<()> {
             let level = parse_log_level(&config.level)?;
-            let filter = EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| format!("phaeton={},tokio_modbus=warn", level).into());
+            let filter = build_env_filter(level);
 
-            // In tests or when explicitly disabled, use console-only logging and return early
-            if cfg!(test) || std::env::var_os("PHAETON_DISABLE_FILE_LOG").is_some() {
-                let console_layer = {
-                    let layer = fmt::layer()
-                        .with_writer(std::io::stdout)
-                        .with_target(false)
-                        .with_thread_ids(false)
-                        .with_file(false);
-                    if config.json_format {
-                        layer.json().boxed()
-                    } else {
-                        layer.boxed()
-                    }
-                };
-
-                tracing_subscriber::registry()
-                    .with(filter)
-                    .with(console_layer)
-                    .init();
-
-                info!("Logging initialized - level: {}, console-only", level);
+            if should_use_console_only() {
+                init_console_only_logging(filter, config.json_format, level);
                 return Ok(());
             }
 
-            // Normal path: set up file logging (with optional console)
-            let registry = tracing_subscriber::registry().with(filter);
-
-            // Set up log file appender with rotation
-            let file_appender = rolling::Builder::new()
-                .rotation(rolling::Rotation::DAILY)
-                .filename_prefix("phaeton")
-                .filename_suffix("log")
-                .max_log_files(config.backup_count as usize)
-                .build({
-                    // If config.file is a file path, use its parent dir; otherwise treat as dir
-                    let p = Path::new(&config.file);
-                    if p.extension().is_some() {
-                        p.parent().unwrap_or(p)
-                    } else {
-                        p
-                    }
-                })
-                .map_err(|e| {
-                    PhaetonError::io(format!("Failed to create log file appender: {}", e))
-                })?;
-
-            let (non_blocking_appender, guard) = non_blocking(file_appender);
-            let _ = LOG_GUARD.set(guard);
-
-            let file_layer = {
-                let layer = fmt::layer()
-                    .with_writer(non_blocking_appender)
-                    .with_target(false)
-                    .with_thread_ids(false)
-                    .with_file(false);
-                if config.json_format {
-                    layer.json().boxed()
-                } else {
-                    layer.boxed()
-                }
-            };
-
-            let subscriber = registry.with(file_layer);
-
-            if config.console_output {
-                let console_layer = {
-                    let layer = fmt::layer()
-                        .with_writer(std::io::stdout)
-                        .with_target(false)
-                        .with_thread_ids(false)
-                        .with_file(false);
-                    if config.json_format {
-                        layer.json().boxed()
-                    } else {
-                        layer.boxed()
-                    }
-                };
-                subscriber.with(console_layer).init();
-            } else {
-                subscriber.init();
-            }
-
-            info!(
-                "Logging initialized - level: {}, file: {}",
-                level, config.file
-            );
+            init_file_logging(config, filter, level)?;
             Ok(())
         })();
 
@@ -124,6 +42,100 @@ pub fn init_logging(config: &LoggingConfig) -> Result<()> {
     if let Some(err) = INIT_ERROR.get() {
         return Err(PhaetonError::config(err.clone()));
     }
+    Ok(())
+}
+
+fn build_env_filter(level: Level) -> EnvFilter {
+    EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| format!("phaeton={},tokio_modbus=warn", level).into())
+}
+
+fn should_use_console_only() -> bool {
+    cfg!(test) || std::env::var_os("PHAETON_DISABLE_FILE_LOG").is_some()
+}
+
+fn init_console_only_logging(filter: EnvFilter, json_format: bool, level: Level) {
+    let console_layer = {
+        let layer = fmt::layer()
+            .with_writer(std::io::stdout)
+            .with_target(false)
+            .with_thread_ids(false)
+            .with_file(false);
+        if json_format {
+            layer.json().boxed()
+        } else {
+            layer.boxed()
+        }
+    };
+
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(console_layer)
+        .init();
+
+    info!("Logging initialized - level: {}, console-only", level);
+}
+
+fn init_file_logging(config: &LoggingConfig, filter: EnvFilter, level: Level) -> Result<()> {
+    let registry = tracing_subscriber::registry().with(filter);
+
+    // Set up log file appender with rotation
+    let file_appender = rolling::Builder::new()
+        .rotation(rolling::Rotation::DAILY)
+        .filename_prefix("phaeton")
+        .filename_suffix("log")
+        .max_log_files(config.backup_count as usize)
+        .build({
+            // If config.file is a file path, use its parent dir; otherwise treat as dir
+            let p = Path::new(&config.file);
+            if p.extension().is_some() {
+                p.parent().unwrap_or(p)
+            } else {
+                p
+            }
+        })
+        .map_err(|e| PhaetonError::io(format!("Failed to create log file appender: {}", e)))?;
+
+    let (non_blocking_appender, guard) = non_blocking(file_appender);
+    let _ = LOG_GUARD.set(guard);
+
+    let file_layer = {
+        let layer = fmt::layer()
+            .with_writer(non_blocking_appender)
+            .with_target(false)
+            .with_thread_ids(false)
+            .with_file(false);
+        if config.json_format {
+            layer.json().boxed()
+        } else {
+            layer.boxed()
+        }
+    };
+
+    let subscriber = registry.with(file_layer);
+
+    if config.console_output {
+        let console_layer = {
+            let layer = fmt::layer()
+                .with_writer(std::io::stdout)
+                .with_target(false)
+                .with_thread_ids(false)
+                .with_file(false);
+            if config.json_format {
+                layer.json().boxed()
+            } else {
+                layer.boxed()
+            }
+        };
+        subscriber.with(console_layer).init();
+    } else {
+        subscriber.init();
+    }
+
+    info!(
+        "Logging initialized - level: {}, file: {}",
+        level, config.file
+    );
     Ok(())
 }
 
