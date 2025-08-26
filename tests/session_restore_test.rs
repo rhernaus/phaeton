@@ -65,8 +65,8 @@ fn restore_session_state_and_trim_history() {
     assert!(hist.len() <= 5);
 
     // Set cost on last session
-    mgr.set_cost_on_last_session(3.14);
+    mgr.set_cost_on_last_session(std::f64::consts::PI);
     let state2 = mgr.get_state();
     let last = state2.get("last_session").unwrap().as_object().unwrap();
-    assert_eq!(last.get("cost").and_then(|v| v.as_f64()), Some(3.14));
+    assert_eq!(last.get("cost").and_then(|v| v.as_f64()), Some(std::f64::consts::PI));
 }
