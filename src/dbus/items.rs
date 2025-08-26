@@ -17,6 +17,119 @@ impl BusItem {
         Self { path, shared }
     }
 
+    fn normalize_start_stop(value: &serde_json::Value) -> serde_json::Value {
+        let v = match value {
+            serde_json::Value::Bool(b) => {
+                if *b {
+                    1
+                } else {
+                    0
+                }
+            }
+            serde_json::Value::Number(n) => {
+                if n.as_u64().unwrap_or(0) > 0 || n.as_i64().unwrap_or(0) > 0 {
+                    1
+                } else {
+                    0
+                }
+            }
+            serde_json::Value::String(s) => {
+                let t = s.trim().to_ascii_lowercase();
+                if t == "1" || t == "true" || t == "on" || t == "enabled" {
+                    1
+                } else {
+                    0
+                }
+            }
+            _ => 0,
+        };
+        serde_json::json!(v)
+    }
+
+    fn normalize_mode(value: &serde_json::Value) -> serde_json::Value {
+        let m: u8 = match value {
+            serde_json::Value::Number(n) => {
+                let v = n
+                    .as_u64()
+                    .or_else(|| n.as_i64().map(|i| i as u64))
+                    .unwrap_or(0) as u8;
+                match v {
+                    0 => 0,
+                    1 => 1,
+                    2 => 2,
+                    _ => 0,
+                }
+            }
+            serde_json::Value::Bool(b) => {
+                if *b {
+                    1
+                } else {
+                    0
+                }
+            }
+            serde_json::Value::String(s) => {
+                let t = s.trim().to_ascii_lowercase();
+                if t == "manual" || t == "0" {
+                    0
+                } else if t == "auto" || t == "1" {
+                    1
+                } else if t == "scheduled" || t == "schedule" || t == "2" {
+                    2
+                } else {
+                    0
+                }
+            }
+            _ => 0,
+        };
+        serde_json::json!(m)
+    }
+
+    fn normalize_value_for_path(&self, sv_local: &serde_json::Value) -> serde_json::Value {
+        match self.path.as_str() {
+            "/StartStop" => Self::normalize_start_stop(sv_local),
+            "/Mode" => Self::normalize_mode(sv_local),
+            _ => sv_local.clone(),
+        }
+    }
+
+    fn dispatch_driver_command(
+        &self,
+        shared: &DbusSharedState,
+        normalized_json: &serde_json::Value,
+        original_sv: &serde_json::Value,
+    ) {
+        match self.path.as_str() {
+            "/Mode" => {
+                let m = normalized_json
+                    .as_u64()
+                    .map(|v| v as u8)
+                    .or_else(|| normalized_json.as_i64().map(|v| v as u8))
+                    .unwrap_or(0);
+                let _ = shared
+                    .commands_tx
+                    .send(crate::driver::DriverCommand::SetMode(m));
+            }
+            "/StartStop" => {
+                let v: u8 = normalized_json
+                    .as_u64()
+                    .map(|u| if u > 0 { 1 } else { 0 })
+                    .or_else(|| normalized_json.as_i64().map(|i| if i > 0 { 1 } else { 0 }))
+                    .or_else(|| normalized_json.as_bool().map(|b| if b { 1 } else { 0 }))
+                    .unwrap_or(0);
+                let _ = shared
+                    .commands_tx
+                    .send(crate::driver::DriverCommand::SetStartStop(v));
+            }
+            "/SetCurrent" => {
+                let a = original_sv.as_f64().unwrap_or(0.0) as f32;
+                let _ = shared
+                    .commands_tx
+                    .send(crate::driver::DriverCommand::SetCurrent(a));
+            }
+            _ => {}
+        }
+    }
+
     pub(crate) fn serde_to_owned_value(v: &serde_json::Value) -> OwnedValue {
         match v {
             serde_json::Value::Null => OwnedValue::from(0i64),
@@ -72,7 +185,6 @@ impl BusItem {
     }
 
     #[zbus(name = "SetValue")]
-    #[allow(clippy::cognitive_complexity)]
     async fn set_value(&self, value: OwnedValue) -> i32 {
         let (conn_opt, root_path, normalized_json, sv) = {
             let mut shared = self.shared.lock().unwrap();
@@ -80,72 +192,7 @@ impl BusItem {
                 return 1;
             }
             let sv_local = Self::owned_value_to_serde(&value);
-            let normalized = if self.path == "/StartStop" {
-                let v = match sv_local {
-                    serde_json::Value::Bool(b) => {
-                        if b {
-                            1
-                        } else {
-                            0
-                        }
-                    }
-                    serde_json::Value::Number(ref n) => {
-                        if n.as_u64().unwrap_or(0) > 0 || n.as_i64().unwrap_or(0) > 0 {
-                            1
-                        } else {
-                            0
-                        }
-                    }
-                    serde_json::Value::String(ref s) => {
-                        let t = s.trim().to_ascii_lowercase();
-                        if t == "1" || t == "true" || t == "on" || t == "enabled" {
-                            1
-                        } else {
-                            0
-                        }
-                    }
-                    _ => 0,
-                };
-                serde_json::json!(v)
-            } else if self.path == "/Mode" {
-                let m: u8 = match sv_local {
-                    serde_json::Value::Number(ref n) => {
-                        let v = n
-                            .as_u64()
-                            .or_else(|| n.as_i64().map(|i| i as u64))
-                            .unwrap_or(0) as u8;
-                        match v {
-                            0 => 0,
-                            1 => 1,
-                            2 => 2,
-                            _ => 0,
-                        }
-                    }
-                    serde_json::Value::Bool(b) => {
-                        if b {
-                            1
-                        } else {
-                            0
-                        }
-                    }
-                    serde_json::Value::String(ref s) => {
-                        let t = s.trim().to_ascii_lowercase();
-                        if t == "manual" || t == "0" {
-                            0
-                        } else if t == "auto" || t == "1" {
-                            1
-                        } else if t == "scheduled" || t == "schedule" || t == "2" {
-                            2
-                        } else {
-                            0
-                        }
-                    }
-                    _ => 0,
-                };
-                serde_json::json!(m)
-            } else {
-                sv_local.clone()
-            };
+            let normalized = self.normalize_value_for_path(&sv_local);
             shared.paths.insert(self.path.clone(), normalized.clone());
             (
                 shared.connection.clone(),
@@ -181,36 +228,7 @@ impl BusItem {
         }
 
         let shared = self.shared.lock().unwrap();
-        match self.path.as_str() {
-            "/Mode" => {
-                let m = normalized_json
-                    .as_u64()
-                    .map(|v| v as u8)
-                    .or_else(|| normalized_json.as_i64().map(|v| v as u8))
-                    .unwrap_or(0);
-                let _ = shared
-                    .commands_tx
-                    .send(crate::driver::DriverCommand::SetMode(m));
-            }
-            "/StartStop" => {
-                let v: u8 = normalized_json
-                    .as_u64()
-                    .map(|u| if u > 0 { 1 } else { 0 })
-                    .or_else(|| normalized_json.as_i64().map(|i| if i > 0 { 1 } else { 0 }))
-                    .or_else(|| normalized_json.as_bool().map(|b| if b { 1 } else { 0 }))
-                    .unwrap_or(0);
-                let _ = shared
-                    .commands_tx
-                    .send(crate::driver::DriverCommand::SetStartStop(v));
-            }
-            "/SetCurrent" => {
-                let a = sv.as_f64().unwrap_or(0.0) as f32;
-                let _ = shared
-                    .commands_tx
-                    .send(crate::driver::DriverCommand::SetCurrent(a));
-            }
-            _ => {}
-        }
+        self.dispatch_driver_command(&shared, &normalized_json, &sv);
 
         0
     }

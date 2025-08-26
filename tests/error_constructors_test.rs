@@ -1,8 +1,7 @@
 use phaeton::error::PhaetonError;
 
 #[test]
-#[allow(clippy::cognitive_complexity)]
-fn error_constructors_cover_variants() {
+fn error_constructors_group_1() {
     assert!(matches!(
         PhaetonError::config("x"),
         PhaetonError::Config { .. }
@@ -13,6 +12,10 @@ fn error_constructors_cover_variants() {
     ));
     assert!(matches!(PhaetonError::dbus("x"), PhaetonError::DBus { .. }));
     assert!(matches!(PhaetonError::web("x"), PhaetonError::Web { .. }));
+}
+
+#[test]
+fn error_constructors_group_2() {
     let ser = PhaetonError::Serialization {
         message: "s".into(),
     };
@@ -23,6 +26,10 @@ fn error_constructors_cover_variants() {
         PhaetonError::Network { .. }
     ));
     assert!(matches!(PhaetonError::api("x"), PhaetonError::Api { .. }));
+}
+
+#[test]
+fn error_constructors_group_3() {
     assert!(matches!(PhaetonError::auth("x"), PhaetonError::Auth { .. }));
     assert!(matches!(
         PhaetonError::validation("f", "m"),

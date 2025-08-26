@@ -127,7 +127,6 @@ impl super::AlfenDriver {
         Ok(())
     }
 
-    #[allow(clippy::cognitive_complexity)]
     pub(crate) async fn try_start_dbus_with_identity(&mut self) -> Result<()> {
         let mut dbus =
             crate::dbus::DbusService::new(self.config.device_instance, self.commands_tx.clone())
@@ -135,7 +134,17 @@ impl super::AlfenDriver {
         dbus.start().await?;
         self.dbus = Some(std::sync::Arc::new(tokio::sync::Mutex::new(dbus)));
 
-        let start_stop_init: u8 = self.start_stop as u8;
+        self.publish_initial_dbus_paths().await;
+        self.ensure_control_items().await;
+
+        let _ = self.refresh_charger_identity().await;
+
+        let snapshot = std::sync::Arc::new(self.build_typed_snapshot(None));
+        let _ = self.status_snapshot_tx.send(snapshot);
+        Ok(())
+    }
+
+    async fn publish_initial_dbus_paths(&self) {
         if let Some(d) = &self.dbus {
             let conn_str = format!(
                 "Modbus TCP at {}:{}",
@@ -163,7 +172,12 @@ impl super::AlfenDriver {
                     ("/Model".to_string(), serde_json::json!("AC22NS")),
                 ])
                 .await;
+        }
+    }
 
+    async fn ensure_control_items(&self) {
+        if let Some(d) = &self.dbus {
+            let start_stop_init: u8 = self.start_stop as u8;
             let _ = d
                 .lock()
                 .await
@@ -199,11 +213,5 @@ impl super::AlfenDriver {
                 .ensure_item("/EnableDisplay", serde_json::json!(0u8), true)
                 .await;
         }
-
-        let _ = self.refresh_charger_identity().await;
-
-        let snapshot = std::sync::Arc::new(self.build_typed_snapshot(None));
-        let _ = self.status_snapshot_tx.send(snapshot);
-        Ok(())
     }
 }
