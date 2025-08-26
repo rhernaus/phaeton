@@ -1,4 +1,4 @@
-use phaeton::vehicle::{VehicleIntegration, VehicleStatus, VehicleClient};
+use phaeton::vehicle::{VehicleClient, VehicleIntegration, VehicleStatus};
 
 struct StubClient;
 
