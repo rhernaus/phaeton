@@ -28,43 +28,83 @@ impl DbusService {
     /// Export a typed driver snapshot to D-Bus paths
     pub async fn export_typed_snapshot(&mut self, snap: &DriverSnapshot) -> Result<()> {
         // Derive forward/session energy and charging time if available
-        let (energy_forward, charging_time): (f64, i64) = if let Some(obj) = snap.session.as_object() {
-            let fwd = obj
-                .get("energy_delivered_kwh")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.0);
-            let t = obj
-                .get("charging_time_sec")
-                .and_then(|v| v.as_i64())
-                .unwrap_or(0);
-            (fwd, t)
-        } else {
-            (0.0, 0)
-        };
+        let (energy_forward, charging_time): (f64, i64) =
+            if let Some(obj) = snap.session.as_object() {
+                let fwd = obj
+                    .get("energy_delivered_kwh")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0);
+                let t = obj
+                    .get("charging_time_sec")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
+                (fwd, t)
+            } else {
+                (0.0, 0)
+            };
 
         // Map snapshot fields to Victron D-Bus paths
         let updates = [
             ("/Ac/Power".to_string(), serde_json::json!(snap.ac_power)),
-            ("/Ac/Current".to_string(), serde_json::json!(snap.ac_current)),
+            (
+                "/Ac/Current".to_string(),
+                serde_json::json!(snap.ac_current),
+            ),
             ("/Current".to_string(), serde_json::json!(snap.ac_current)),
-            ("/Ac/Energy/Total".to_string(), serde_json::json!(snap.total_energy_kwh)),
-            ("/Ac/Energy/Forward".to_string(), serde_json::json!(energy_forward)),
-            ("/Ac/PhaseCount".to_string(), serde_json::json!(snap.active_phases)),
-            ("/Ac/L1/Voltage".to_string(), serde_json::json!(snap.l1_voltage)),
-            ("/Ac/L2/Voltage".to_string(), serde_json::json!(snap.l2_voltage)),
-            ("/Ac/L3/Voltage".to_string(), serde_json::json!(snap.l3_voltage)),
-            ("/Ac/L1/Current".to_string(), serde_json::json!(snap.l1_current)),
-            ("/Ac/L2/Current".to_string(), serde_json::json!(snap.l2_current)),
-            ("/Ac/L3/Current".to_string(), serde_json::json!(snap.l3_current)),
+            (
+                "/Ac/Energy/Total".to_string(),
+                serde_json::json!(snap.total_energy_kwh),
+            ),
+            (
+                "/Ac/Energy/Forward".to_string(),
+                serde_json::json!(energy_forward),
+            ),
+            (
+                "/Ac/PhaseCount".to_string(),
+                serde_json::json!(snap.active_phases),
+            ),
+            (
+                "/Ac/L1/Voltage".to_string(),
+                serde_json::json!(snap.l1_voltage),
+            ),
+            (
+                "/Ac/L2/Voltage".to_string(),
+                serde_json::json!(snap.l2_voltage),
+            ),
+            (
+                "/Ac/L3/Voltage".to_string(),
+                serde_json::json!(snap.l3_voltage),
+            ),
+            (
+                "/Ac/L1/Current".to_string(),
+                serde_json::json!(snap.l1_current),
+            ),
+            (
+                "/Ac/L2/Current".to_string(),
+                serde_json::json!(snap.l2_current),
+            ),
+            (
+                "/Ac/L3/Current".to_string(),
+                serde_json::json!(snap.l3_current),
+            ),
             ("/Ac/L1/Power".to_string(), serde_json::json!(snap.l1_power)),
             ("/Ac/L2/Power".to_string(), serde_json::json!(snap.l2_power)),
             ("/Ac/L3/Power".to_string(), serde_json::json!(snap.l3_power)),
             ("/Status".to_string(), serde_json::json!(snap.status)),
-            ("/MaxCurrent".to_string(), serde_json::json!(snap.station_max_current)),
-            ("/ChargingTime".to_string(), serde_json::json!(charging_time)),
+            (
+                "/MaxCurrent".to_string(),
+                serde_json::json!(snap.station_max_current),
+            ),
+            (
+                "/ChargingTime".to_string(),
+                serde_json::json!(charging_time),
+            ),
             ("/Mode".to_string(), serde_json::json!(snap.mode)),
             ("/StartStop".to_string(), serde_json::json!(snap.start_stop)),
-            ("/SetCurrent".to_string(), serde_json::json!(snap.set_current)),
+            (
+                "/SetCurrent".to_string(),
+                serde_json::json!(snap.set_current),
+            ),
         ];
         self.update_paths(updates).await
     }
