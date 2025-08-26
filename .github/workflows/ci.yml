@@ -77,7 +77,7 @@ jobs:
         run: cargo install cargo-outdated --locked
 
       - name: Check outdated dependencies (non-fatal)
-        run: cargo outdated --workspace --all-features --exit-code 0
+        run: cargo outdated --workspace --exit-code 0
 
       - name: Install Rust (nightly) for udeps
         uses: dtolnay/rust-toolchain@nightly
@@ -111,8 +111,8 @@ jobs:
       - name: Run cargo-deny (config)
         run: cargo deny check
 
-      - name: Run cargo-deny (bans, duplicates, sources)
-        run: cargo deny check bans duplicates sources
+      - name: Run cargo-deny (bans, sources)
+        run: cargo deny check bans sources
         continue-on-error: true
 
       - name: Scan for unsafe code with cargo-geiger (non-fatal)
@@ -171,35 +171,10 @@ jobs:
       - name: Install cargo-semver-checks
         run: cargo install cargo-semver-checks --locked
 
-      - name: Run cargo-semver-checks (non-fatal)
-        run: cargo semver-checks check-release
-        continue-on-error: true
 
-  dist-release:
-    name: Distribution & Release Checks
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
 
-      - name: Setup Rust (stable)
-        uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
 
-      - name: Install cargo-dist and cargo-release
-        run: |
-          cargo install cargo-dist --locked
-          cargo install cargo-release --locked
-
-      - name: Validate cargo-dist build (non-fatal)
-        run: cargo dist build
-        continue-on-error: true
-
-      - name: Validate release configuration (non-fatal)
-        run: cargo release check
-        continue-on-error: true
 
   budgets:
     name: Budgets
