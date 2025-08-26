@@ -24,6 +24,7 @@ mod dbus_helpers;
 mod pv;
 mod runtime;
 mod runtime_arc;
+mod runtime_poll;
 mod snapshot;
 
 // Measurements and ModbusCommand moved to types.rs

@@ -1,0 +1,236 @@
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use zbus::object_server::SignalEmitter;
+use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
+
+use super::shared::DbusSharedState;
+use super::util::format_text_value;
+
+/// VeDbus-style BusItem implementing com.victronenergy.BusItem
+pub struct BusItem {
+    pub(crate) path: String,
+    pub(crate) shared: Arc<Mutex<DbusSharedState>>,
+}
+
+impl BusItem {
+    pub fn new(path: String, shared: Arc<Mutex<DbusSharedState>>) -> Self {
+        Self { path, shared }
+    }
+
+    pub(crate) fn serde_to_owned_value(v: &serde_json::Value) -> OwnedValue {
+        match v {
+            serde_json::Value::Null => OwnedValue::from(0i64),
+            serde_json::Value::Bool(b) => OwnedValue::from(*b),
+            serde_json::Value::Number(n) => {
+                if let Some(i) = n.as_i64() {
+                    OwnedValue::from(i)
+                } else if let Some(u) = n.as_u64() {
+                    OwnedValue::from(u)
+                } else {
+                    OwnedValue::from(n.as_f64().unwrap_or(0.0))
+                }
+            }
+            serde_json::Value::String(s) => OwnedValue::try_from(Value::from(s.as_str()))
+                .unwrap_or_else(|_| OwnedValue::from(0i64)),
+            _ => OwnedValue::from(0i64),
+        }
+    }
+
+    pub(crate) fn owned_value_to_serde(v: &OwnedValue) -> serde_json::Value {
+        if let Ok(b) = <bool as TryFrom<&OwnedValue>>::try_from(v) {
+            return serde_json::json!(b);
+        }
+        if let Ok(i) = <i64 as TryFrom<&OwnedValue>>::try_from(v) {
+            return serde_json::json!(i);
+        }
+        if let Ok(u) = <u64 as TryFrom<&OwnedValue>>::try_from(v) {
+            return serde_json::json!(u);
+        }
+        if let Ok(f) = <f64 as TryFrom<&OwnedValue>>::try_from(v) {
+            return serde_json::json!(f);
+        }
+        if let Ok(s) = <&str as TryFrom<&OwnedValue>>::try_from(v) {
+            return serde_json::json!(s.to_string());
+        }
+        serde_json::json!(v.to_string())
+    }
+}
+
+#[zbus::interface(name = "com.victronenergy.BusItem")]
+impl BusItem {
+    #[zbus(name = "GetValue")]
+    async fn get_value(&self) -> OwnedValue {
+        let val = {
+            let shared = self.shared.lock().unwrap();
+            shared
+                .paths
+                .get(&self.path)
+                .cloned()
+                .unwrap_or(serde_json::json!(0))
+        };
+        Self::serde_to_owned_value(&val)
+    }
+
+    #[zbus(name = "SetValue")]
+    #[allow(clippy::cognitive_complexity)]
+    async fn set_value(&self, value: OwnedValue) -> i32 {
+        let (conn_opt, root_path, normalized_json, sv) = {
+            let mut shared = self.shared.lock().unwrap();
+            if !shared.writable.contains(&self.path) {
+                return 1;
+            }
+            let sv_local = Self::owned_value_to_serde(&value);
+            let normalized = if self.path == "/StartStop" {
+                let v = match sv_local {
+                    serde_json::Value::Bool(b) => {
+                        if b {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    serde_json::Value::Number(ref n) => {
+                        if n.as_u64().unwrap_or(0) > 0 || n.as_i64().unwrap_or(0) > 0 {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    serde_json::Value::String(ref s) => {
+                        let t = s.trim().to_ascii_lowercase();
+                        if t == "1" || t == "true" || t == "on" || t == "enabled" {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    _ => 0,
+                };
+                serde_json::json!(v)
+            } else if self.path == "/Mode" {
+                let m: u8 = match sv_local {
+                    serde_json::Value::Number(ref n) => {
+                        let v = n
+                            .as_u64()
+                            .or_else(|| n.as_i64().map(|i| i as u64))
+                            .unwrap_or(0) as u8;
+                        match v {
+                            0 => 0,
+                            1 => 1,
+                            2 => 2,
+                            _ => 0,
+                        }
+                    }
+                    serde_json::Value::Bool(b) => {
+                        if b {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    serde_json::Value::String(ref s) => {
+                        let t = s.trim().to_ascii_lowercase();
+                        if t == "manual" || t == "0" {
+                            0
+                        } else if t == "auto" || t == "1" {
+                            1
+                        } else if t == "scheduled" || t == "schedule" || t == "2" {
+                            2
+                        } else {
+                            0
+                        }
+                    }
+                    _ => 0,
+                };
+                serde_json::json!(m)
+            } else {
+                sv_local.clone()
+            };
+            shared.paths.insert(self.path.clone(), normalized.clone());
+            (
+                shared.connection.clone(),
+                shared.root_path.clone(),
+                normalized,
+                sv_local,
+            )
+        };
+
+        if let Some(conn) = conn_opt {
+            if let Ok(obj_path) = OwnedObjectPath::try_from(self.path.as_str())
+                && let Ok(item_ctx) = SignalEmitter::new(&conn, obj_path)
+            {
+                let mut changes: HashMap<&str, OwnedValue> = HashMap::new();
+                changes.insert("Value", BusItem::serde_to_owned_value(&normalized_json));
+                let text = format_text_value(&normalized_json);
+                if let Ok(text_ov) = OwnedValue::try_from(Value::from(text.as_str())) {
+                    changes.insert("Text", text_ov);
+                }
+                let _ = BusItem::properties_changed(&item_ctx, changes).await;
+            }
+            if let Ok(root_ctx) = SignalEmitter::new(&conn, root_path) {
+                let mut inner: HashMap<&str, OwnedValue> = HashMap::new();
+                inner.insert("Value", BusItem::serde_to_owned_value(&normalized_json));
+                let text = format_text_value(&normalized_json);
+                if let Ok(text_ov) = OwnedValue::try_from(Value::from(text.as_str())) {
+                    inner.insert("Text", text_ov);
+                }
+                let mut outer: HashMap<&str, HashMap<&str, OwnedValue>> = HashMap::new();
+                outer.insert(self.path.as_str(), inner);
+                let _ = crate::dbus::RootBus::items_changed(&root_ctx, outer).await;
+            }
+        }
+
+        let shared = self.shared.lock().unwrap();
+        match self.path.as_str() {
+            "/Mode" => {
+                let m = normalized_json
+                    .as_u64()
+                    .map(|v| v as u8)
+                    .or_else(|| normalized_json.as_i64().map(|v| v as u8))
+                    .unwrap_or(0);
+                let _ = shared
+                    .commands_tx
+                    .send(crate::driver::DriverCommand::SetMode(m));
+            }
+            "/StartStop" => {
+                let v: u8 = normalized_json
+                    .as_u64()
+                    .map(|u| if u > 0 { 1 } else { 0 })
+                    .or_else(|| normalized_json.as_i64().map(|i| if i > 0 { 1 } else { 0 }))
+                    .or_else(|| normalized_json.as_bool().map(|b| if b { 1 } else { 0 }))
+                    .unwrap_or(0);
+                let _ = shared
+                    .commands_tx
+                    .send(crate::driver::DriverCommand::SetStartStop(v));
+            }
+            "/SetCurrent" => {
+                let a = sv.as_f64().unwrap_or(0.0) as f32;
+                let _ = shared
+                    .commands_tx
+                    .send(crate::driver::DriverCommand::SetCurrent(a));
+            }
+            _ => {}
+        }
+
+        0
+    }
+
+    #[zbus(name = "GetText")]
+    async fn get_text(&self) -> String {
+        let val = {
+            let shared = self.shared.lock().unwrap();
+            shared
+                .paths
+                .get(&self.path)
+                .cloned()
+                .unwrap_or(serde_json::json!(0))
+        };
+        format_text_value(&val)
+    }
+
+    #[zbus(signal)]
+    pub async fn properties_changed(
+        ctxt: &SignalEmitter<'_>,
+        changes: HashMap<&str, OwnedValue>,
+    ) -> zbus::Result<()>;
+}

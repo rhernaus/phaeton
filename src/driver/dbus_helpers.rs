@@ -4,7 +4,8 @@ impl super::AlfenDriver {
     pub fn get_db_value(&self, path: &str) -> Option<serde_json::Value> {
         if let Some(d) = &self.dbus {
             if let Ok(guard) = d.try_lock() {
-                guard.get(path)
+                let shared = guard.shared.lock().unwrap();
+                shared.paths.get(path).cloned()
             } else {
                 None
             }
