@@ -224,6 +224,7 @@ pub struct TibberConfig {
 
 /// Control and safety limits
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
 pub struct ControlsConfig {
     /// Tolerance for current verification
     pub current_tolerance: f32,
