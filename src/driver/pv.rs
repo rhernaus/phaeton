@@ -28,6 +28,7 @@ impl super::AlfenDriver {
         Some(excess as f32)
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn calculate_excess_pv_power_with_dbus(
         dbus: &crate::dbus::DbusService,
         ev_power_w: f64,

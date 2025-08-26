@@ -59,6 +59,7 @@ pub enum DriverCommand {
 
 /// Measurements sampled from Modbus by the worker
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub(super) struct Measurements {
     pub l1_v: f64,
     pub l2_v: f64,
@@ -78,6 +79,7 @@ pub(super) struct Measurements {
 
 /// Commands to the Modbus worker
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub(super) enum ModbusCommand {
     WriteSetCurrent(f32),
 }

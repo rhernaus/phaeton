@@ -1,5 +1,8 @@
-// placeholder module; implementation to be added in future refactor
+use super::AlfenDriver;
+use crate::error::Result;
+use std::sync::Arc;
 
-// use crate::error::Result; // unused until implementation lands
-
-// Placeholder module; full implementation will be moved here next
+pub(crate) async fn run_on_arc_impl(driver: Arc<tokio::sync::Mutex<AlfenDriver>>) -> Result<()> {
+    let mut drv = driver.lock().await;
+    drv.run().await
+}

@@ -125,8 +125,7 @@ impl super::AlfenDriver {
             last_current_set_time: std::time::Instant::now(),
             last_set_current_monotonic: std::time::Instant::now(),
             last_status: 0,
-            pv_excess_ema_w: 0.0,
-            last_nonzero_excess_at: std::time::Instant::now(),
+
             min_charge_timer_deadline: None,
             auto_mode_entered_at: None,
             commands_rx,
