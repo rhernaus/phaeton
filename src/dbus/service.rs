@@ -5,6 +5,7 @@ use zbus::zvariant::OwnedObjectPath;
 use zbus::{Connection, Result as ZbusResult, names::WellKnownName};
 
 use crate::driver::DriverCommand;
+use crate::driver::DriverSnapshot;
 use crate::error::{PhaetonError, Result};
 use crate::logging::get_logger;
 
@@ -24,6 +25,49 @@ pub struct DbusService {
 }
 
 impl DbusService {
+    /// Export a typed driver snapshot to D-Bus paths
+    pub async fn export_typed_snapshot(&mut self, snap: &DriverSnapshot) -> Result<()> {
+        // Derive forward/session energy and charging time if available
+        let (energy_forward, charging_time): (f64, i64) = if let Some(obj) = snap.session.as_object() {
+            let fwd = obj
+                .get("energy_delivered_kwh")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
+            let t = obj
+                .get("charging_time_sec")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+            (fwd, t)
+        } else {
+            (0.0, 0)
+        };
+
+        // Map snapshot fields to Victron D-Bus paths
+        let updates = [
+            ("/Ac/Power".to_string(), serde_json::json!(snap.ac_power)),
+            ("/Ac/Current".to_string(), serde_json::json!(snap.ac_current)),
+            ("/Current".to_string(), serde_json::json!(snap.ac_current)),
+            ("/Ac/Energy/Total".to_string(), serde_json::json!(snap.total_energy_kwh)),
+            ("/Ac/Energy/Forward".to_string(), serde_json::json!(energy_forward)),
+            ("/Ac/PhaseCount".to_string(), serde_json::json!(snap.active_phases)),
+            ("/Ac/L1/Voltage".to_string(), serde_json::json!(snap.l1_voltage)),
+            ("/Ac/L2/Voltage".to_string(), serde_json::json!(snap.l2_voltage)),
+            ("/Ac/L3/Voltage".to_string(), serde_json::json!(snap.l3_voltage)),
+            ("/Ac/L1/Current".to_string(), serde_json::json!(snap.l1_current)),
+            ("/Ac/L2/Current".to_string(), serde_json::json!(snap.l2_current)),
+            ("/Ac/L3/Current".to_string(), serde_json::json!(snap.l3_current)),
+            ("/Ac/L1/Power".to_string(), serde_json::json!(snap.l1_power)),
+            ("/Ac/L2/Power".to_string(), serde_json::json!(snap.l2_power)),
+            ("/Ac/L3/Power".to_string(), serde_json::json!(snap.l3_power)),
+            ("/Status".to_string(), serde_json::json!(snap.status)),
+            ("/MaxCurrent".to_string(), serde_json::json!(snap.station_max_current)),
+            ("/ChargingTime".to_string(), serde_json::json!(charging_time)),
+            ("/Mode".to_string(), serde_json::json!(snap.mode)),
+            ("/StartStop".to_string(), serde_json::json!(snap.start_stop)),
+            ("/SetCurrent".to_string(), serde_json::json!(snap.set_current)),
+        ];
+        self.update_paths(updates).await
+    }
     pub async fn update_paths(
         &mut self,
         updates: impl IntoIterator<Item = (String, serde_json::Value)>,
@@ -300,5 +344,80 @@ impl DbusService {
         .map_err(|e| PhaetonError::dbus(format!("GetValue call failed: {}", e)))?;
 
         Ok(crate::dbus::items::BusItem::owned_value_to_serde(&val))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::mpsc;
+
+    #[tokio::test]
+    async fn export_snapshot_populates_key_paths() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut svc = DbusService::new(0, tx).await.unwrap();
+
+        let snap = DriverSnapshot {
+            timestamp: "2020-01-01T00:00:00Z".to_string(),
+            mode: 1,
+            start_stop: 1,
+            set_current: 6.0,
+            applied_current: 6.0,
+            station_max_current: 16.0,
+            device_instance: 0,
+            product_name: Some("Alfen NV EV Charger".to_string()),
+            firmware: Some("7.2.0".to_string()),
+            serial: Some("ABC".to_string()),
+            status: 2,
+            active_phases: 3,
+            ac_power: 4000.0,
+            ac_current: 6.0,
+            l1_voltage: 230.0,
+            l2_voltage: 230.0,
+            l3_voltage: 230.0,
+            l1_current: 6.0,
+            l2_current: 6.0,
+            l3_current: 6.0,
+            l1_power: 1300.0,
+            l2_power: 1300.0,
+            l3_power: 1400.0,
+            total_energy_kwh: 2628.0,
+            pricing_currency: None,
+            energy_rate: None,
+            session: serde_json::json!({"charging_time_sec": 60, "energy_delivered_kwh": 0.064}),
+            poll_duration_ms: Some(1000),
+            total_polls: 10,
+            overrun_count: 0,
+            poll_interval_ms: 1000,
+            excess_pv_power_w: 0.0,
+        };
+
+        svc.export_typed_snapshot(&snap).await.unwrap();
+        let shared = svc.shared.lock().unwrap();
+        for key in [
+            "/Ac/Power",
+            "/Ac/Current",
+            "/Current",
+            "/Ac/Energy/Total",
+            "/Ac/Energy/Forward",
+            "/Ac/PhaseCount",
+            "/Ac/L1/Voltage",
+            "/Ac/L2/Voltage",
+            "/Ac/L3/Voltage",
+            "/Ac/L1/Current",
+            "/Ac/L2/Current",
+            "/Ac/L3/Current",
+            "/Ac/L1/Power",
+            "/Ac/L2/Power",
+            "/Ac/L3/Power",
+            "/Status",
+            "/MaxCurrent",
+            "/ChargingTime",
+            "/Mode",
+            "/StartStop",
+            "/SetCurrent",
+        ] {
+            assert!(shared.paths.contains_key(key), "missing path: {}", key);
+        }
     }
 }

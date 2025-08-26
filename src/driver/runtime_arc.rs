@@ -63,6 +63,15 @@ async fn run_poll_cycle_and_update_metrics(driver: &Arc<Mutex<AlfenDriver>>) {
     if dur_ms > d.config.poll_interval_ms {
         d.overrun_count = d.overrun_count.saturating_add(1);
     }
+    // After updating measurements and snapshot in poll_cycle, mirror key values to D-Bus
+    if let Some(dbus) = d.dbus.as_ref() {
+        let snapshot = d.build_typed_snapshot(Some(dur_ms));
+        let _ = dbus
+            .lock()
+            .await
+            .export_typed_snapshot(&snapshot)
+            .await;
+    }
 }
 
 /// Run the driver using an Arc<Mutex<AlfenDriver>> without holding the lock across awaits.
