@@ -1,6 +1,7 @@
 use phaeton::error::PhaetonError;
 
 #[test]
+#[allow(clippy::cognitive_complexity)]
 fn error_constructors_cover_variants() {
     assert!(matches!(
         PhaetonError::config("x"),

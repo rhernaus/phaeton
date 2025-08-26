@@ -527,6 +527,7 @@ impl DbusService {
     }
 
     /// Update a D-Bus path value (local cache and reflective properties)
+    #[allow(clippy::cognitive_complexity)]
     pub async fn update_path(&mut self, path: &str, value: serde_json::Value) -> Result<()> {
         // Skip no-op updates to avoid log spam and unnecessary signals
         {
@@ -828,6 +829,7 @@ impl DbusService {
     }
 
     /// Export a snapshot (subset) to D-Bus. Call from a dedicated exporter task.
+    #[allow(clippy::cognitive_complexity)]
     pub async fn export_snapshot(&mut self, snapshot: &serde_json::Value) -> Result<()> {
         let mut updates: Vec<(String, serde_json::Value)> = Vec::with_capacity(24);
 
@@ -1040,6 +1042,7 @@ impl BusItem {
 
     /// Attempt to set the value; returns 0 on success (VeDbus-compatible)
     #[zbus(name = "SetValue")]
+    #[allow(clippy::cognitive_complexity)]
     async fn set_value(&self, value: OwnedValue) -> i32 {
         // Stage 1: validate, normalize, cache, and capture connection and roots without any await
         let (conn_opt, root_path, normalized_json, sv) = {
