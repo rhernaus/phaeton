@@ -7,8 +7,8 @@
 use crate::config::ModbusConfig;
 use crate::error::{PhaetonError, Result};
 use crate::logging::get_logger;
-use futures::future::BoxFuture;
 use std::time::Duration;
+use std::{future::Future, pin::Pin};
 use tokio::time::{sleep, timeout};
 use tokio_modbus::client::tcp;
 use tokio_modbus::prelude::*;
@@ -352,7 +352,8 @@ impl ModbusConnectionManager {
     /// Execute a Modbus operation with automatic reconnection
     pub async fn execute_with_reconnect<F, T>(&mut self, mut operation: F) -> Result<T>
     where
-        for<'a> F: FnMut(&'a mut ModbusClient) -> BoxFuture<'a, Result<T>>,
+        for<'a> F:
+            FnMut(&'a mut ModbusClient) -> Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>,
     {
         let mut attempts = 0;
 

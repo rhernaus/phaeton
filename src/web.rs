@@ -19,7 +19,9 @@ use tokio_stream::StreamExt;
 use tokio_stream::wrappers::WatchStream;
 use tower_http::services::ServeDir;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
-use utoipa::{OpenApi, ToSchema};
+#[cfg(feature = "openapi")]
+use utoipa::OpenApi;
+#[cfg(feature = "openapi")]
 use utoipa_swagger_ui::SwaggerUi;
 
 #[derive(Clone)]
@@ -28,12 +30,14 @@ pub struct AppState {
     pub snapshot_rx: watch::Receiver<Arc<DriverSnapshot>>,
 }
 
-#[derive(Deserialize, ToSchema)]
+#[derive(Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ModeBody {
     pub mode: u8,
 }
 
-#[derive(Deserialize, ToSchema)]
+#[derive(Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct StartStopBody {
     /// Preferred numeric value: 1 = enable, 0 = stop
     #[serde(default)]
@@ -43,21 +47,22 @@ pub struct StartStopBody {
     pub enabled: Option<bool>,
 }
 
-#[derive(Deserialize, ToSchema)]
+#[derive(Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SetCurrentBody {
     pub amps: f32,
 }
 
-#[utoipa::path(get, path = "/api/health", responses(
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/health", responses(
     (status = 200, description = "Service is healthy")
-))]
+)))]
 async fn health() -> impl IntoResponse {
     (StatusCode::OK, "ok")
 }
 
-#[utoipa::path(get, path = "/api/metrics", responses(
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/metrics", responses(
     (status = 200, description = "Driver metrics")
-))]
+)))]
 async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
     let snap = state.snapshot_rx.borrow().clone();
     // Compute age_ms from timestamp
@@ -81,9 +86,9 @@ async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
     Json(body)
 }
 
-#[utoipa::path(get, path = "/api/status", responses(
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/status", responses(
     (status = 200, description = "Driver status")
-))]
+)))]
 async fn status(State(state): State<AppState>) -> impl IntoResponse {
     // Lock-free path: try to read the latest snapshot, else return unavailable
     let snapshot = state.snapshot_rx.borrow().clone();
@@ -91,14 +96,14 @@ async fn status(State(state): State<AppState>) -> impl IntoResponse {
     Json((*snapshot).clone()).into_response()
 }
 
-#[utoipa::path(post, path = "/api/mode", request_body = ModeBody, responses((status = 200)))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/mode", request_body = ModeBody, responses((status = 200))))]
 async fn set_mode(State(state): State<AppState>, Json(body): Json<ModeBody>) -> impl IntoResponse {
     let mut drv = state.driver.lock().await;
     drv.set_mode(body.mode).await;
     (StatusCode::OK, Json(serde_json::json!({"ok":true})))
 }
 
-#[utoipa::path(post, path = "/api/startstop", request_body = StartStopBody, responses((status = 200)))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/startstop", request_body = StartStopBody, responses((status = 200))))]
 async fn set_startstop(
     State(state): State<AppState>,
     Json(body): Json<StartStopBody>,
@@ -112,7 +117,7 @@ async fn set_startstop(
     (StatusCode::OK, Json(serde_json::json!({"ok":true})))
 }
 
-#[utoipa::path(post, path = "/api/set_current", request_body = SetCurrentBody, responses((status = 200)))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/set_current", request_body = SetCurrentBody, responses((status = 200))))]
 async fn set_current(
     State(state): State<AppState>,
     Json(body): Json<SetCurrentBody>,
@@ -122,7 +127,7 @@ async fn set_current(
     (StatusCode::OK, Json(serde_json::json!({"ok":true})))
 }
 
-#[utoipa::path(get, path = "/api/config", responses((status = 200)))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/config", responses((status = 200))))]
 async fn get_config(State(state): State<AppState>) -> impl IntoResponse {
     let drv = state.driver.lock().await;
     let mut json = serde_json::to_value(drv.config().clone())
@@ -134,7 +139,7 @@ async fn get_config(State(state): State<AppState>) -> impl IntoResponse {
     Json(json)
 }
 
-#[utoipa::path(put, path = "/api/config", responses((status = 200)))]
+#[cfg_attr(feature = "openapi", utoipa::path(put, path = "/api/config", responses((status = 200))))]
 async fn put_config(
     State(state): State<AppState>,
     Json(new_cfg_value): Json<serde_json::Value>,
@@ -164,18 +169,20 @@ async fn put_config(
     (StatusCode::OK, Json(serde_json::json!({"ok":true})))
 }
 
+#[cfg(feature = "openapi")]
 #[utoipa::path(get, path = "/api/config/schema", responses((status = 200)))]
 async fn get_config_schema() -> impl IntoResponse {
     let schema = schemars::schema_for!(crate::config::Config);
     Json(serde_json::to_value(&schema).unwrap_or(serde_json::json!({"error":"schema"})))
 }
 
-#[derive(Debug, Deserialize, ToSchema, utoipa::IntoParams)]
+#[derive(Debug, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema, utoipa::IntoParams))]
 pub struct TailParams {
     pub lines: Option<usize>,
 }
 
-#[utoipa::path(get, path = "/api/logs/tail", params(TailParams), responses((status = 200)))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/logs/tail", params(TailParams), responses((status = 200))))]
 async fn logs_tail(
     State(state): State<AppState>,
     Query(params): Query<TailParams>,
@@ -205,7 +212,7 @@ async fn logs_tail(
     }
 }
 
-#[utoipa::path(get, path = "/api/logs/head", params(TailParams), responses((status = 200)))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/logs/head", params(TailParams), responses((status = 200))))]
 async fn logs_head(
     State(state): State<AppState>,
     Query(params): Query<TailParams>,
@@ -235,7 +242,7 @@ async fn logs_head(
     }
 }
 
-#[utoipa::path(get, path = "/api/logs/download", responses((status = 200)))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/logs/download", responses((status = 200))))]
 async fn logs_download(State(state): State<AppState>) -> impl IntoResponse {
     let path = {
         let drv = state.driver.lock().await;
@@ -254,19 +261,19 @@ async fn logs_download(State(state): State<AppState>) -> impl IntoResponse {
     }
 }
 
-#[utoipa::path(get, path = "/api/sessions", responses((status = 200)))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/sessions", responses((status = 200))))]
 async fn sessions(State(state): State<AppState>) -> impl IntoResponse {
     let drv = state.driver.lock().await;
     Json(drv.sessions_snapshot())
 }
 
-#[utoipa::path(get, path = "/api/dbus", responses((status = 200)))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/dbus", responses((status = 200))))]
 async fn dbus_dump(State(state): State<AppState>) -> impl IntoResponse {
     let drv = state.driver.lock().await;
     Json(drv.get_dbus_cache_snapshot())
 }
 
-#[utoipa::path(get, path = "/api/update/status", responses((status = 200)))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/update/status", responses((status = 200))))]
 async fn update_status() -> impl IntoResponse {
     let updater = crate::updater::GitUpdater::new(
         "https://github.com/your-org/phaeton".to_string(),
@@ -277,7 +284,7 @@ async fn update_status() -> impl IntoResponse {
     )
 }
 
-#[utoipa::path(post, path = "/api/update/check", responses((status = 200)))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/update/check", responses((status = 200))))]
 async fn update_check() -> impl IntoResponse {
     let mut updater = crate::updater::GitUpdater::new(
         "https://github.com/your-org/phaeton".to_string(),
@@ -292,7 +299,7 @@ async fn update_check() -> impl IntoResponse {
     }
 }
 
-#[utoipa::path(post, path = "/api/update/apply", responses((status = 200)))]
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/update/apply", responses((status = 200))))]
 async fn update_apply() -> impl IntoResponse {
     let mut updater = crate::updater::GitUpdater::new(
         "https://github.com/your-org/phaeton".to_string(),
@@ -307,7 +314,7 @@ async fn update_apply() -> impl IntoResponse {
     }
 }
 
-#[utoipa::path(get, path = "/api/events", responses((status = 200)))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/events", responses((status = 200))))]
 async fn events(State(state): State<AppState>) -> impl IntoResponse {
     let rx = state.snapshot_rx.clone();
     let stream = WatchStream::new(rx).map(|snapshot| {
@@ -317,7 +324,8 @@ async fn events(State(state): State<AppState>) -> impl IntoResponse {
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
-#[derive(OpenApi)]
+#[cfg(feature = "openapi")]
+#[derive(utoipa::OpenApi)]
 #[openapi(
     paths(
         health, status, set_mode, set_startstop, set_current,
@@ -332,9 +340,10 @@ async fn events(State(state): State<AppState>) -> impl IntoResponse {
 pub struct ApiDoc;
 
 pub fn build_router(state: AppState) -> Router {
+    #[cfg(feature = "openapi")]
     let openapi = ApiDoc::openapi();
 
-    Router::new()
+    let mut router = Router::new()
         .route("/", get(|| async { Redirect::to("/ui/index.html") }))
         .route("/api/health", get(health))
         .route("/api/metrics", get(metrics))
@@ -343,7 +352,19 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/startstop", post(set_startstop))
         .route("/api/set_current", post(set_current))
         .route("/api/config", get(get_config).put(put_config))
-        .route("/api/config/schema", get(get_config_schema))
+        .route(
+            "/api/config/schema",
+            get({
+                #[cfg(feature = "openapi")]
+                {
+                    get_config_schema
+                }
+                #[cfg(not(feature = "openapi"))]
+                {
+                    || async { (StatusCode::NOT_FOUND, "Schema not enabled") }
+                }
+            }),
+        )
         .route("/api/logs/tail", get(logs_tail))
         .route("/api/logs/head", get(logs_head))
         .route("/api/logs/download", get(logs_download))
@@ -363,10 +384,16 @@ pub fn build_router(state: AppState) -> Router {
             get_service(ServeDir::new("./webui").append_index_html_on_directories(true))
                 .handle_error(|_| async { StatusCode::INTERNAL_SERVER_ERROR }),
         )
-        .merge(SwaggerUi::new("/docs").url("/openapi.json", openapi))
         .with_state(state)
         .layer(CorsLayer::permissive())
-        .layer(TraceLayer::new_for_http())
+        .layer(TraceLayer::new_for_http());
+
+    #[cfg(feature = "openapi")]
+    {
+        router = router.merge(SwaggerUi::new("/docs").url("/openapi.json", openapi));
+    }
+
+    router
 }
 
 pub async fn serve(driver: Arc<Mutex<AlfenDriver>>, host: &str, port: u16) -> anyhow::Result<()> {

@@ -180,6 +180,7 @@ impl From<serde_json::Error> for PhaetonError {
 //     }
 // }
 
+#[cfg(feature = "tibber")]
 impl From<reqwest::Error> for PhaetonError {
     fn from(err: reqwest::Error) -> Self {
         PhaetonError::network(err.to_string())
@@ -193,11 +194,7 @@ impl From<reqwest::Error> for PhaetonError {
 //     }
 // }
 
-impl From<config::ConfigError> for PhaetonError {
-    fn from(err: config::ConfigError) -> Self {
-        PhaetonError::config(err.to_string())
-    }
-}
+// External config::ConfigError not used; we manage config locally
 
 impl From<chrono::ParseError> for PhaetonError {
     fn from(err: chrono::ParseError) -> Self {

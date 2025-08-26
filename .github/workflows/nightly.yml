@@ -43,7 +43,7 @@ jobs:
           CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER: arm-linux-gnueabihf-gcc
           PKG_CONFIG_ALLOW_CROSS: "1"
         run: |
-          cargo build --target armv7-unknown-linux-gnueabihf --release --verbose
+          cargo build --target armv7-unknown-linux-gnueabihf --release --verbose --all-features
 
       - name: Build (aarch64)
         env:
@@ -53,11 +53,11 @@ jobs:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           PKG_CONFIG_ALLOW_CROSS: "1"
         run: |
-          cargo build --target aarch64-unknown-linux-gnu --release --verbose
+          cargo build --target aarch64-unknown-linux-gnu --release --verbose --all-features
 
       - name: Build (x86_64)
         run: |
-          cargo build --target x86_64-unknown-linux-gnu --release --verbose
+          cargo build --target x86_64-unknown-linux-gnu --release --verbose --all-features
 
       - name: Package artifacts
         run: |

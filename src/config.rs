@@ -4,7 +4,6 @@
 //! configuration from YAML files with support for environment variable overrides.
 
 use crate::error::{PhaetonError, Result};
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -14,7 +13,8 @@ fn default_true() -> bool {
 }
 
 /// Main configuration structure
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct Config {
     /// Modbus TCP connection configuration
     pub modbus: ModbusConfig,
@@ -58,17 +58,18 @@ pub struct Config {
 
     /// Vehicle integrations (optional) - keep out of schema & serialized output
     #[serde(skip_serializing)]
-    #[schemars(skip)]
+    #[cfg_attr(feature = "openapi", schemars(skip))]
     pub vehicle: Option<HashMap<String, serde_yaml::Value>>,
 
     /// Multiple vehicle configurations - keep out of schema & serialized output
     #[serde(skip_serializing)]
-    #[schemars(skip)]
+    #[cfg_attr(feature = "openapi", schemars(skip))]
     pub vehicles: Option<HashMap<String, serde_yaml::Value>>,
 }
 
 /// Modbus TCP connection parameters
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct ModbusConfig {
     /// IP address of the EV charger
     pub ip: String,
@@ -84,7 +85,8 @@ pub struct ModbusConfig {
 }
 
 /// Modbus register address mappings
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct RegistersConfig {
     /// Voltage register addresses (L1, L2, L3)
     pub voltages: u16,
@@ -131,7 +133,8 @@ pub struct RegistersConfig {
 }
 
 /// Default operational values
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct DefaultsConfig {
     /// Default charging current in amperes
     pub intended_set_current: f32,
@@ -141,7 +144,8 @@ pub struct DefaultsConfig {
 }
 
 /// Logging configuration
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct LoggingConfig {
     /// Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
     pub level: String,
@@ -166,7 +170,8 @@ pub struct LoggingConfig {
 }
 
 /// Individual schedule configuration
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct ScheduleItem {
     /// Whether this schedule is active
     pub active: bool,
@@ -188,14 +193,16 @@ pub struct ScheduleItem {
 }
 
 /// Schedule configuration container
-#[derive(Debug, Clone, Serialize, Deserialize, Default, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct ScheduleConfig {
     /// List of schedule items
     pub items: Vec<ScheduleItem>,
 }
 
 /// Tibber API configuration
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct TibberConfig {
     /// Tibber API access token
     pub access_token: String,
@@ -223,7 +230,8 @@ pub struct TibberConfig {
 }
 
 /// Control and safety limits
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct ControlsConfig {
     /// Tolerance for current verification
@@ -274,7 +282,8 @@ pub struct ControlsConfig {
 }
 
 /// Web server configuration
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct WebConfig {
     /// Bind address
     pub host: String,
@@ -284,7 +293,8 @@ pub struct WebConfig {
 }
 
 /// Pricing configuration
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct PricingConfig {
     /// Source (victron or static)
     pub source: String,

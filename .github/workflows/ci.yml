@@ -237,7 +237,7 @@ jobs:
           echo "PKG_CONFIG_PATH=${{ matrix.pkgconfig }}" >> $GITHUB_ENV
 
       - name: Build (release)
-        run: cargo build --target ${{ matrix.target }} --release --locked --verbose
+        run: cargo build --target ${{ matrix.target }} --release --locked --verbose --all-features
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

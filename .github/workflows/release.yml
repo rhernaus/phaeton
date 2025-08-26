@@ -98,7 +98,7 @@ jobs:
           echo "PKG_CONFIG_PATH=${{ matrix.pkgconfig }}" >> $GITHUB_ENV
 
       - name: Build (release)
-        run: cargo build --target ${{ matrix.target }} --release --locked --verbose
+        run: cargo build --target ${{ matrix.target }} --release --locked --verbose --all-features
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -111,15 +111,15 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [build-linux, prepare]
     steps:
+      - name: Checkout repository for packaging assets
+        uses: actions/checkout@v5
+
       - name: Download compiled binaries
         uses: actions/download-artifact@v5
         with:
           pattern: phaeton-*
           path: artifacts
           merge-multiple: false
-
-      - name: Checkout repository for packaging assets
-        uses: actions/checkout@v5
 
       - name: Package artifacts
         run: |
