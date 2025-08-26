@@ -229,6 +229,26 @@ cargo build --target x86_64-unknown-linux-gnu --release
 - On tag (e.g., `v0.x.y`): build cross-compiled artifacts (ARMv7, AArch64, x86_64), generate `SHA256SUMS`, and publish to Releases.
 - Nightly prerelease is updated from `main`.
 
+## Testing safety nets
+
+- Fuzzing (nightly toolchain required):
+  - Initialize once: `cargo fuzz init`
+  - Build: `rustup default nightly && cargo fuzz build && rustup default stable`
+  - Run a target: `rustup default nightly && cargo fuzz run fuzz_decode_modbus -runs=100000 && rustup default stable`
+
+- Mutation testing:
+  - List mutants: `cargo mutants --list --no-run`
+  - Run a subset: `cargo mutants --in src/modbus.rs`
+
+- Public API snapshot:
+  - Install deps (Ubuntu): `sudo apt-get install -y pkg-config libssl-dev zlib1g-dev`
+  - Show API: `cargo public-api --simplified`
+
+- Semver checks:
+  - Compare with last tag: `cargo semver-checks check-release --baseline-rev $(git describe --tags --abbrev=0)`
+
+CI includes non-blocking jobs for these; we can tighten them once they stabilize.
+
 ## Architecture
 
 The application follows a modular architecture with clear separation of concerns:

@@ -1,0 +1,11 @@
+[mutants]
+# Skip very large or integration-heavy modules initially
+exclude = [
+	"src/dbus.rs",
+	"src/driver.rs",
+	"src/web.rs"
+]
+
+[testing]
+# Use default test command; increase timeout for async tests
+timeout_secs = 120

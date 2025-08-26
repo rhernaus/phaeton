@@ -203,3 +203,91 @@ jobs:
         with:
           name: tarball-${{ matrix.target }}
           path: dist/phaeton-ci-${{ steps.shortsha.outputs.value }}-${{ matrix.target }}.tar.gz
+
+  fuzz-build:
+    name: Fuzz targets build (nightly)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Setup Rust (nightly)
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustc-dev
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: Init fuzz (idempotent)
+        run: |
+          if [ ! -d fuzz ]; then cargo fuzz init; fi
+      - name: Build fuzz targets
+        run: cargo fuzz build
+      - name: Mark job non-blocking
+        continue-on-error: true
+
+  mutants-dry-run:
+    name: Mutation testing (dry-run)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Setup Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Install cargo-mutants
+        run: cargo install cargo-mutants --locked
+      - name: Dry run (list mutants)
+        run: cargo mutants --list --no-run
+      - name: Mark job non-blocking
+        continue-on-error: true
+
+  public-api:
+    name: Public API diff
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Setup Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Install cargo-public-api
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends pkg-config libssl-dev zlib1g-dev
+          cargo install cargo-public-api --locked
+      - name: Show public API
+        run: cargo public-api --simplified
+      - name: Mark job non-blocking
+        continue-on-error: true
+
+  semver-checks:
+    name: Semver checks (library API)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Setup Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Install cargo-semver-checks
+        run: cargo install cargo-semver-checks --locked
+      - name: Run semver checks
+        run: |
+          # Compare current code to last tag (if any)
+          if git describe --tags --abbrev=0 >/dev/null 2>&1; then
+            BASE=$(git describe --tags --abbrev=0)
+            echo "Comparing against $BASE"
+            cargo semver-checks check-release --baseline-rev "$BASE" || true
+          else
+            echo "No tags found; skipping semver baseline"
+          fi
+      - name: Mark job non-blocking
+        continue-on-error: true
