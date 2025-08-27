@@ -1,6 +1,7 @@
 //! Axum-based HTTP server with OpenAPI (utoipa) and Swagger UI
 
 use crate::driver::{AlfenDriver, DriverSnapshot};
+use crate::web_schema;
 use axum::response::Redirect;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::{
@@ -159,6 +160,9 @@ async fn put_config(
             Json(serde_json::json!({"error":"invalid config"})),
         );
     }
+
+    // Apply and persist
+    let cfg_to_save = new_cfg.clone();
     let mut drv = state.driver.lock().await;
     if drv.update_config(new_cfg).is_err() {
         return (
@@ -166,14 +170,26 @@ async fn put_config(
             Json(serde_json::json!({"error":"apply failed"})),
         );
     }
-    (StatusCode::OK, Json(serde_json::json!({"ok":true})))
+    // Try to persist to disk (best-effort)
+    let mut saved_path: Option<&'static str> = None;
+    if cfg_to_save
+        .save_to_file("/data/phaeton_config.yaml")
+        .is_ok()
+    {
+        saved_path = Some("/data/phaeton_config.yaml");
+    } else if cfg_to_save.save_to_file("phaeton_config.yaml").is_ok() {
+        saved_path = Some("phaeton_config.yaml");
+    }
+    let body = match saved_path {
+        Some(p) => serde_json::json!({"ok": true, "saved": true, "path": p}),
+        None => serde_json::json!({"ok": true, "saved": false}),
+    };
+    (StatusCode::OK, Json(body))
 }
 
-#[cfg(feature = "openapi")]
-#[utoipa::path(get, path = "/api/config/schema", responses((status = 200)))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/config/schema", responses((status = 200))))]
 async fn get_config_schema() -> impl IntoResponse {
-    let schema = schemars::schema_for!(crate::config::Config);
-    Json(serde_json::to_value(&schema).unwrap_or(serde_json::json!({"error":"schema"})))
+    Json(web_schema::build_ui_schema())
 }
 
 #[derive(Debug, Deserialize)]
@@ -352,19 +368,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/startstop", post(set_startstop))
         .route("/api/set_current", post(set_current))
         .route("/api/config", get(get_config).put(put_config))
-        .route(
-            "/api/config/schema",
-            get({
-                #[cfg(feature = "openapi")]
-                {
-                    get_config_schema
-                }
-                #[cfg(not(feature = "openapi"))]
-                {
-                    || async { (StatusCode::NOT_FOUND, "Schema not enabled") }
-                }
-            }),
-        )
+        .route("/api/config/schema", get(get_config_schema))
         .route("/api/logs/tail", get(logs_tail))
         .route("/api/logs/head", get(logs_head))
         .route("/api/logs/download", get(logs_download))

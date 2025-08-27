@@ -303,29 +303,112 @@ impl super::AlfenDriver {
             )
             .await
             .unwrap_or(0.0);
+        let soc_below_min = self.enforce_soc_limit_maybe(&mut effective).await;
+        self.apply_insufficient_solar_grace_timer(soc_below_min, &mut effective);
+        (effective, soc_below_min)
+    }
 
-        let mut soc_below_min: Option<bool> = None;
-        if matches!(self.start_stop, crate::controls::StartStopState::Enabled)
-            && (matches!(self.current_mode, crate::controls::ChargingMode::Auto)
-                || matches!(self.current_mode, crate::controls::ChargingMode::Scheduled))
-            && let Some((soc, min_limit)) = self.fetch_battery_soc_and_minimum_limit().await
+    async fn enforce_soc_limit_maybe(&mut self, effective: &mut f32) -> Option<bool> {
+        if !matches!(self.start_stop, crate::controls::StartStopState::Enabled) {
+            return None;
+        }
+        if !(matches!(self.current_mode, crate::controls::ChargingMode::Auto)
+            || matches!(self.current_mode, crate::controls::ChargingMode::Scheduled))
+        {
+            return None;
+        }
+        if let Some((soc, min_limit)) = self.fetch_battery_soc_and_minimum_limit().await
             && soc.is_finite()
             && min_limit.is_finite()
         {
-            soc_below_min = Some(soc < min_limit);
-            if soc < min_limit
-                && !matches!(self.current_mode, crate::controls::ChargingMode::Manual)
-            {
-                if effective > 0.0 {
+            let below = soc < min_limit;
+            if below && !matches!(self.current_mode, crate::controls::ChargingMode::Manual) {
+                if *effective > 0.0 {
                     self.logger.info(&format!(
                         "Stopping charging due to Low SOC: SoC={:.1}% < MinimumSocLimit={:.1}%",
                         soc, min_limit
                     ));
                 }
-                effective = 0.0;
+                *effective = 0.0;
+            }
+            Some(below)
+        } else {
+            None
+        }
+    }
+
+    fn apply_insufficient_solar_grace_timer(
+        &mut self,
+        soc_below_min: Option<bool>,
+        effective: &mut f32,
+    ) {
+        if soc_below_min == Some(true)
+            || !matches!(self.start_stop, crate::controls::StartStopState::Enabled)
+            || !matches!(self.current_mode, crate::controls::ChargingMode::Auto)
+        {
+            // Mode disabled, not Auto, or low SoC -> no grace behavior
+            if self.min_charge_timer_deadline.is_some()
+                && !matches!(self.current_mode, crate::controls::ChargingMode::Auto)
+            {
+                self.min_charge_timer_deadline = None;
+            }
+            return;
+        }
+
+        let min_current = self.config.controls.min_set_current.max(0.0);
+        let now = std::time::Instant::now();
+        let recently_set =
+            self.last_set_current_monotonic.elapsed() < std::time::Duration::from_secs(10);
+        let was_charging = self.last_sent_current >= (min_current - 0.05);
+
+        if *effective < min_current && (was_charging || recently_set) {
+            match self.min_charge_timer_deadline {
+                None => {
+                    // Start the grace timer
+                    let secs = self.config.controls.min_charge_duration_seconds as u64;
+                    self.min_charge_timer_deadline =
+                        Some(now + std::time::Duration::from_secs(secs));
+                    if min_current > 0.0 {
+                        *effective = min_current;
+                    }
+                    self.logger.info(&format!(
+                        "Insufficient PV: starting {}s grace timer; holding at {:.2} A",
+                        self.config.controls.min_charge_duration_seconds, min_current
+                    ));
+                }
+                Some(deadline) => {
+                    if deadline > now {
+                        // Keep holding minimum current while timer active
+                        if min_current > 0.0 {
+                            *effective = min_current;
+                        }
+                        let remaining = deadline.saturating_duration_since(now).as_secs();
+                        self.logger.debug(&format!(
+                            "Insufficient PV: grace timer active ({}s remaining)",
+                            remaining
+                        ));
+                    } else {
+                        // Timer expired; allow stopping
+                        self.min_charge_timer_deadline = None;
+                        // effective remains as computed (likely 0.0)
+                        self.logger
+                            .info("Insufficient PV: grace timer expired; allowing stop");
+                    }
+                }
+            }
+        } else if *effective >= min_current {
+            // PV sufficient again -> clear any outstanding timer
+            if self.min_charge_timer_deadline.is_some() {
+                self.min_charge_timer_deadline = None;
+                self.logger
+                    .info("Sufficient PV restored; clearing grace timer");
+            }
+        } else {
+            // Not recently charging and below min -> ensure timer cleared
+            if self.min_charge_timer_deadline.is_some() {
+                self.min_charge_timer_deadline = None;
             }
         }
-        (effective, soc_below_min)
     }
 
     fn apply_current_if_needed(
@@ -450,6 +533,14 @@ impl super::AlfenDriver {
                 .calculate_excess_pv_power(ev_power_for_subtract)
                 .await
                 .unwrap_or(0.0);
+            // Track excess PV for snapshots, with optional EMA smoothing
+            let alpha = self.config.controls.pv_excess_ema_alpha.clamp(0.0, 1.0);
+            let smoothed = if alpha > 0.0 {
+                alpha * excess_pv_power_w + (1.0f32 - alpha) * self.last_excess_pv_power_w
+            } else {
+                excess_pv_power_w
+            };
+            self.last_excess_pv_power_w = smoothed;
             let (effective, soc_below_min) = self
                 .compute_effective_current_with_soc(requested, now_secs, excess_pv_power_w)
                 .await;

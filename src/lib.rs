@@ -47,6 +47,7 @@ pub mod tibber;
 pub mod updater;
 pub mod vehicle;
 pub mod web;
+pub mod web_schema;
 
 // Re-export commonly used types
 pub use config::Config;
