@@ -343,7 +343,7 @@ pub fn build_router(state: AppState) -> Router {
     #[cfg(feature = "openapi")]
     let openapi = ApiDoc::openapi();
 
-    let mut router = Router::new()
+    let router = Router::new()
         .route("/", get(|| async { Redirect::to("/ui/index.html") }))
         .route("/api/health", get(health))
         .route("/api/metrics", get(metrics))
@@ -389,9 +389,7 @@ pub fn build_router(state: AppState) -> Router {
         .layer(TraceLayer::new_for_http());
 
     #[cfg(feature = "openapi")]
-    {
-        router = router.merge(SwaggerUi::new("/docs").url("/openapi.json", openapi));
-    }
+    let router = router.merge(SwaggerUi::new("/docs").url("/openapi.json", openapi));
 
     router
 }
