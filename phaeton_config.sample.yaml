@@ -59,8 +59,8 @@ controls:
   current_tolerance: 0.5
   update_difference_threshold: 0.1
   verification_delay: 0.1
-  retry_delay: 0.5
-  max_retries: 3
+  retry_delay: 1.0
+  max_retries: 10
   watchdog_interval_seconds: 30
   max_set_current: 64.0
   # Minimum EVSE current in amps; below this we either send 0 A or 6 A depending on mode
