@@ -359,8 +359,10 @@ logging:
   file: "/var/log/phaeton.log"
   format: structured
 
+schedule:
+  mode: time   # time | tibber
+
 tibber:
-  enabled: false
   access_token: ""
   home_id: ""       # Optional; default is first home on the account
   charge_on_cheap: true
@@ -376,7 +378,7 @@ web:
 
 ### Tibber dynamic pricing
 
-When built with the `tibber` feature and `tibber.enabled: true` with a valid `access_token`, Scheduled mode will use Tibber prices to decide whether to enable charging for the current hour. Without the feature, Tibber-related helpers return stubbed responses.
+When built with the `tibber` feature and `schedule.mode: tibber` with a valid `tibber.access_token`, Scheduled mode will use Tibber prices to decide whether to enable charging for the current hour. Without the feature, Tibber-related helpers return stubbed responses.
 
 - strategy=level: charge on VERY_CHEAP/CHEAP based on `charge_on_*` flags
 - strategy=threshold: charge when current `total` <= `max_price_total`

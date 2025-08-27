@@ -185,7 +185,6 @@ impl TibberClient {
             // We clone self to satisfy mutable borrow rules by using shared client below
             let cfg = crate::config::TibberConfig {
                 access_token: self.access_token.clone(),
-                enabled: true,
                 home_id: self.home_id.clone().unwrap_or_default(),
                 charge_on_cheap: true,
                 charge_on_very_cheap: true,
@@ -462,9 +461,6 @@ async fn get_shared_client(cfg: &crate::config::TibberConfig) -> Shared {
 /// Check if charging should be enabled based on Tibber pricing and strategy
 #[cfg(feature = "tibber")]
 pub async fn check_tibber_schedule(cfg: &crate::config::TibberConfig) -> Result<(bool, String)> {
-    if !cfg.enabled {
-        return Ok((false, "Tibber integration disabled".to_string()));
-    }
     if cfg.access_token.trim().is_empty() {
         return Ok((false, "No Tibber access token configured".to_string()));
     }
@@ -530,8 +526,8 @@ pub fn check_tibber_schedule_blocking(cfg: &crate::config::TibberConfig) -> Resu
 /// Convenience wrapper to get a textual overview (refreshes cache)
 #[cfg(feature = "tibber")]
 pub async fn get_hourly_overview_text(cfg: &crate::config::TibberConfig) -> Result<String> {
-    if !cfg.enabled || cfg.access_token.trim().is_empty() {
-        return Ok("Tibber overview: integration not enabled or token missing".to_string());
+    if cfg.access_token.trim().is_empty() {
+        return Ok("Tibber overview: token missing".to_string());
     }
     // Ensure refreshed
     let shared = get_shared_client(cfg).await;
@@ -594,3 +590,132 @@ impl TibberClient {
 }
 
 // removed unused shim
+
+#[cfg(all(test, feature = "tibber"))]
+mod tests {
+    use super::*;
+
+    fn make_cfg() -> crate::config::TibberConfig {
+        crate::config::TibberConfig {
+            access_token: String::new(),
+            home_id: String::new(),
+            charge_on_cheap: true,
+            charge_on_very_cheap: true,
+            strategy: "level".to_string(),
+            max_price_total: 0.0,
+            cheap_percentile: 0.3,
+        }
+    }
+
+    #[test]
+    fn price_level_mapping_roundtrip() {
+        use PriceLevel::*;
+        assert_eq!(PriceLevel::from_str("VERY_CHEAP"), VeryCheap);
+        assert_eq!(PriceLevel::from_str("cheap"), Cheap);
+        assert_eq!(PriceLevel::from_str("normal"), Normal);
+        assert_eq!(PriceLevel::from_str("EXPENSIVE"), Expensive);
+        assert_eq!(PriceLevel::from_str("very_expensive"), VeryExpensive);
+
+        assert_eq!(VeryCheap.as_str(), "VERY_CHEAP");
+        assert_eq!(Cheap.as_str(), "CHEAP");
+        assert_eq!(Normal.as_str(), "NORMAL");
+        assert_eq!(Expensive.as_str(), "EXPENSIVE");
+        assert_eq!(VeryExpensive.as_str(), "VERY_EXPENSIVE");
+    }
+
+    #[test]
+    fn percentile_threshold_edges_and_mid() {
+        let mut c = TibberClient::new(String::new(), None);
+        c.cached_upcoming = vec![
+            PricePoint {
+                starts_at: "t1".into(),
+                total: 1.0,
+                level: PriceLevel::Normal,
+            },
+            PricePoint {
+                starts_at: "t2".into(),
+                total: 2.0,
+                level: PriceLevel::Normal,
+            },
+            PricePoint {
+                starts_at: "t3".into(),
+                total: 3.0,
+                level: PriceLevel::Normal,
+            },
+            PricePoint {
+                starts_at: "t4".into(),
+                total: 4.0,
+                level: PriceLevel::Normal,
+            },
+        ];
+        // 0 -> min
+        assert_eq!(c.determine_percentile_threshold(0.0), Some(1.0));
+        // 1 -> max
+        assert_eq!(c.determine_percentile_threshold(1.0), Some(4.0));
+        // 0.50 -> index 1 (2.0)
+        assert_eq!(c.determine_percentile_threshold(0.5), Some(2.0));
+        // 0.75 -> index 2 (3.0)
+        assert_eq!(c.determine_percentile_threshold(0.75), Some(3.0));
+    }
+
+    #[test]
+    fn decide_should_charge_threshold_and_level() {
+        let mut c = TibberClient::new(String::new(), None);
+        c.cached_current = Some(PricePoint {
+            starts_at: "now".into(),
+            total: 0.15,
+            level: PriceLevel::Cheap,
+        });
+
+        let mut cfg = make_cfg();
+        cfg.strategy = "threshold".to_string();
+        cfg.max_price_total = 0.20;
+        assert!(c.decide_should_charge(&cfg, None));
+
+        cfg.max_price_total = 0.10;
+        assert!(!c.decide_should_charge(&cfg, None));
+
+        // Fallback to level when threshold data missing
+        c.cached_current = None;
+        cfg.max_price_total = 0.0;
+        cfg.strategy = "threshold".to_string();
+        assert!(c.decide_should_charge(&cfg, Some(PriceLevel::Cheap)));
+        assert!(c.decide_should_charge(&cfg, Some(PriceLevel::VeryCheap)));
+        assert!(!c.decide_should_charge(&cfg, Some(PriceLevel::Expensive)));
+    }
+
+    #[test]
+    fn decide_should_charge_percentile() {
+        let mut c = TibberClient::new(String::new(), None);
+        c.cached_current = Some(PricePoint {
+            starts_at: "now".into(),
+            total: 3.0,
+            level: PriceLevel::Normal,
+        });
+        c.cached_upcoming = vec![
+            PricePoint {
+                starts_at: "t1".into(),
+                total: 2.0,
+                level: PriceLevel::Cheap,
+            },
+            PricePoint {
+                starts_at: "t2".into(),
+                total: 3.0,
+                level: PriceLevel::Normal,
+            },
+            PricePoint {
+                starts_at: "t3".into(),
+                total: 4.0,
+                level: PriceLevel::Expensive,
+            },
+        ];
+
+        let mut cfg = make_cfg();
+        cfg.strategy = "percentile".to_string();
+        cfg.cheap_percentile = 0.5; // threshold -> 2.0
+        assert!(!c.decide_should_charge(&cfg, None));
+
+        cfg.cheap_percentile = 1.0; // threshold -> 4.0
+        assert!(c.decide_should_charge(&cfg, None));
+    }
+}

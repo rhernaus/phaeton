@@ -8,7 +8,7 @@ use crate::controls::{ChargingControls, ChargingMode, StartStopState};
 use crate::dbus::DbusService;
 use crate::error::Result;
 // removed unused imports: LogContext, get_logger
-use crate::modbus::ModbusConnectionManager;
+// removed direct use; now via trait in runtime
 use crate::persistence::PersistenceManager;
 use crate::session::ChargingSessionManager;
 // serde only used by types; keep driver free of unused imports
@@ -21,6 +21,7 @@ pub use types::{DriverCommand, DriverSnapshot, DriverState};
 // internal worker types moved out; keep type module private
 mod commands;
 mod dbus_helpers;
+pub mod modbus_like;
 mod pv;
 mod runtime;
 mod runtime_arc;
@@ -36,9 +37,12 @@ pub struct AlfenDriver {
 
     /// Current driver state
     state: watch::Sender<DriverState>,
+    /// Keep one receiver alive so state updates always succeed
+    #[allow(dead_code)]
+    state_rx: watch::Receiver<DriverState>,
 
-    /// Modbus connection manager
-    modbus_manager: Option<ModbusConnectionManager>,
+    /// Modbus connection manager (trait for testability)
+    modbus_manager: Option<Box<dyn modbus_like::ModbusLike>>,
 
     /// Logger with context
     logger: crate::logging::StructuredLogger,

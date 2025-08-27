@@ -26,7 +26,7 @@ impl super::AlfenDriver {
         let logger = crate::logging::get_logger("driver");
 
         let (shutdown_tx, shutdown_rx) = mpsc::unbounded_channel();
-        let (state_tx, _) = watch::channel(super::types::DriverState::Initializing);
+        let (state_tx, state_rx) = watch::channel(super::types::DriverState::Initializing);
 
         logger.info("Initializing EV charger driver");
 
@@ -109,6 +109,7 @@ impl super::AlfenDriver {
         Ok(Self {
             config,
             state: state_tx,
+            state_rx,
             modbus_manager: None,
             logger,
             shutdown_tx,
@@ -229,7 +230,7 @@ impl super::AlfenDriver {
             Duration::from_secs_f64(self.config.controls.retry_delay),
         );
 
-        self.modbus_manager = Some(manager);
+        self.modbus_manager = Some(Box::new(manager));
         self.logger.info("Modbus connection manager initialized");
         Ok(())
     }

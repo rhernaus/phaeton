@@ -93,3 +93,90 @@ pub(crate) async fn run_on_arc_impl(driver: Arc<Mutex<AlfenDriver>>) -> Result<(
         run_poll_cycle_and_update_metrics(&driver).await;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::driver::DriverCommand;
+    use tokio::sync::mpsc;
+
+    async fn make_driver_arc() -> Arc<Mutex<AlfenDriver>> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let driver = AlfenDriver::new(rx, tx).await.unwrap();
+        Arc::new(Mutex::new(driver))
+    }
+
+    #[tokio::test]
+    async fn init_modbus_sets_defaults_and_state_running() {
+        let driver = make_driver_arc().await;
+        init_modbus_and_state(&driver).await.unwrap();
+        let d = driver.lock().await;
+        assert_eq!(d.get_state(), super::super::types::DriverState::Running);
+        assert!(
+            (d.intended_set_current - d.config().defaults.intended_set_current).abs()
+                < f32::EPSILON
+        );
+        assert!(
+            (d.station_max_current - d.config().defaults.station_max_current).abs() < f32::EPSILON
+        );
+    }
+
+    #[tokio::test]
+    async fn get_poll_interval_reflects_config() {
+        let driver = make_driver_arc().await;
+        {
+            let mut d = driver.lock().await;
+            let mut cfg = d.config().clone();
+            cfg.poll_interval_ms = 123;
+            d.update_config(cfg).unwrap();
+        }
+        let ms = get_poll_interval_ms(&driver).await;
+        assert_eq!(ms, 123);
+    }
+
+    #[tokio::test]
+    async fn handle_commands_dispatches_and_shutdown_true() {
+        let driver = make_driver_arc().await;
+        // Dispatch a command
+        {
+            let d = driver.lock().await;
+            let _ = d.commands_tx.send(DriverCommand::SetMode(1));
+        }
+        handle_commands_and_maybe_shutdown(&driver).await.unwrap();
+        {
+            let d = driver.lock().await;
+            assert_eq!(d.current_mode_code(), 1);
+        }
+
+        // Now request shutdown and expect true
+        {
+            let d = driver.lock().await;
+            d.request_shutdown();
+        }
+        let should_break = handle_commands_and_maybe_shutdown(&driver).await.unwrap();
+        assert!(should_break);
+    }
+
+    #[tokio::test]
+    async fn run_poll_cycle_updates_metrics_without_modbus() {
+        let driver = make_driver_arc().await;
+        // No Modbus/D-Bus attached; should still run and increment counters
+        let before = { driver.lock().await.total_polls };
+        run_poll_cycle_and_update_metrics(&driver).await;
+        let after = { driver.lock().await.total_polls };
+        assert_eq!(after, before + 1);
+    }
+
+    #[tokio::test]
+    async fn init_dbus_non_required_allows_continue() {
+        let driver = make_driver_arc().await;
+        {
+            let mut d = driver.lock().await;
+            let mut cfg = d.config().clone();
+            cfg.require_dbus = false;
+            d.update_config(cfg).unwrap();
+        }
+        // Should not error even if cannot connect to a real D-Bus
+        init_dbus_if_configured(&driver).await.unwrap();
+    }
+}

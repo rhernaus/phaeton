@@ -455,6 +455,45 @@ impl ModbusConnectionManager {
     }
 }
 
+#[async_trait::async_trait]
+impl crate::driver::modbus_like::ModbusLike for ModbusConnectionManager {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+    async fn read_holding_registers(
+        &mut self,
+        slave_id: u8,
+        address: u16,
+        count: u16,
+    ) -> Result<Vec<u16>> {
+        self.execute_with_reconnect(|client| {
+            Box::pin(async move {
+                client
+                    .read_holding_registers(slave_id, address, count)
+                    .await
+            })
+        })
+        .await
+    }
+
+    async fn write_multiple_registers(
+        &mut self,
+        slave_id: u8,
+        address: u16,
+        values: &[u16],
+    ) -> Result<()> {
+        self.execute_with_reconnect(|client| {
+            let vals = values.to_vec();
+            Box::pin(async move {
+                client
+                    .write_multiple_registers(slave_id, address, &vals)
+                    .await
+            })
+        })
+        .await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

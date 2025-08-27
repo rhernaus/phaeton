@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::HashMap;
 use tokio::sync::mpsc;
 
 #[test]
@@ -137,4 +138,238 @@ async fn current_mode_reason_strings() {
     assert_eq!(d.current_mode_reason(), "pv_auto");
     d.current_mode = crate::controls::ChargingMode::Scheduled;
     assert_eq!(d.current_mode_reason(), "scheduled");
+}
+
+struct MockModbus {
+    reads: HashMap<(u8, u16, u16), Vec<u16>>,
+    write_ok: bool,
+    last_write: Option<(u8, u16, Vec<u16>)>,
+}
+
+impl MockModbus {
+    fn new() -> Self {
+        Self {
+            reads: HashMap::new(),
+            write_ok: true,
+            last_write: None,
+        }
+    }
+    fn with_read(mut self, slave: u8, addr: u16, count: u16, data: Vec<u16>) -> Self {
+        self.reads.insert((slave, addr, count), data);
+        self
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::driver::modbus_like::ModbusLike for MockModbus {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+    async fn read_holding_registers(
+        &mut self,
+        slave_id: u8,
+        address: u16,
+        count: u16,
+    ) -> crate::error::Result<Vec<u16>> {
+        Ok(self
+            .reads
+            .get(&(slave_id, address, count))
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    async fn write_multiple_registers(
+        &mut self,
+        slave_id: u8,
+        address: u16,
+        values: &[u16],
+    ) -> crate::error::Result<()> {
+        self.last_write = Some((slave_id, address, values.to_vec()));
+        if self.write_ok {
+            Ok(())
+        } else {
+            Err(crate::error::PhaetonError::modbus("mock write error"))
+        }
+    }
+}
+
+fn regs_from_f32(v: f32) -> Vec<u16> {
+    crate::modbus::encode_32bit_float(v).to_vec()
+}
+
+fn regs_from_f64(v: f64) -> Vec<u16> {
+    let be = v.to_be_bytes();
+    vec![
+        ((be[0] as u16) << 8) | be[1] as u16,
+        ((be[2] as u16) << 8) | be[3] as u16,
+        ((be[4] as u16) << 8) | be[5] as u16,
+        ((be[6] as u16) << 8) | be[7] as u16,
+    ]
+}
+
+#[tokio::test]
+async fn update_station_max_current_reads_and_sets_value() {
+    let (tx, rx) = mpsc::unbounded_channel();
+    let mut d = crate::driver::AlfenDriver::new(rx, tx).await.unwrap();
+    let regs = regs_from_f32(32.5);
+    let mock = MockModbus::new().with_read(
+        d.config().modbus.station_slave_id,
+        d.config().registers.station_max_current,
+        2,
+        regs,
+    );
+    d.modbus_manager = Some(Box::new(mock));
+    d.station_max_current = 0.0;
+    d.update_station_max_current_from_modbus().await;
+    assert!((d.get_station_max_current() - 32.5).abs() < f32::EPSILON);
+}
+
+#[tokio::test]
+async fn read_realtime_values_decodes_all_fields() {
+    let (tx, rx) = mpsc::unbounded_channel();
+    let mut d = crate::driver::AlfenDriver::new(rx, tx).await.unwrap();
+    let cfg = d.config().clone();
+    let volt_regs = [230.0f32, 231.0, 229.0]
+        .into_iter()
+        .flat_map(regs_from_f32)
+        .collect::<Vec<_>>();
+    let curr_regs = [6.0f32, 7.0, 8.0]
+        .into_iter()
+        .flat_map(regs_from_f32)
+        .collect::<Vec<_>>();
+    let power_regs = [1200.0f32, 1300.0, 1400.0, 3900.0]
+        .into_iter()
+        .flat_map(regs_from_f32)
+        .collect::<Vec<_>>();
+    let energy_regs = regs_from_f64(1234.0); // becomes 1.234 kWh
+    let status_regs = vec![0x4332, 0, 0, 0, 0]; // "C2\0\0\0\0"
+    let mock = MockModbus::new()
+        .with_read(
+            cfg.modbus.socket_slave_id,
+            cfg.registers.voltages,
+            6,
+            volt_regs,
+        )
+        .with_read(
+            cfg.modbus.socket_slave_id,
+            cfg.registers.currents,
+            6,
+            curr_regs,
+        )
+        .with_read(
+            cfg.modbus.socket_slave_id,
+            cfg.registers.power,
+            8,
+            power_regs,
+        )
+        .with_read(
+            cfg.modbus.socket_slave_id,
+            cfg.registers.energy,
+            4,
+            energy_regs,
+        )
+        .with_read(
+            cfg.modbus.socket_slave_id,
+            cfg.registers.status,
+            5,
+            status_regs,
+        );
+    d.modbus_manager = Some(Box::new(mock));
+    let m = d.read_realtime_values().await;
+    assert!((m.voltages.l1 - 230.0).abs() < 0.01);
+    assert!((m.currents.l3 - 8.0).abs() < 0.01);
+    assert_eq!(m.powers.l2.round() as i64, 1300);
+    assert_eq!(m.total_power.round() as i64, 3900);
+    assert!((m.energy_kwh - 1.234).abs() < 1e-9);
+    assert_eq!(m.status, 2);
+}
+
+#[tokio::test]
+async fn write_effective_current_encodes_and_writes() {
+    let (tx, rx) = mpsc::unbounded_channel();
+    let mut d = crate::driver::AlfenDriver::new(rx, tx).await.unwrap();
+    let mut mock = MockModbus::new();
+    mock.write_ok = true;
+    let cfg = d.config().clone();
+    d.modbus_manager = Some(Box::new(mock));
+    let ok = d.write_effective_current(13.5).await;
+    assert!(ok);
+    let last = d
+        .modbus_manager
+        .as_mut()
+        .unwrap()
+        .as_any_mut()
+        .downcast_mut::<MockModbus>()
+        .unwrap()
+        .last_write
+        .clone();
+    let (slave, addr, vals) = last.expect("expected a write call");
+    assert_eq!(slave, cfg.modbus.socket_slave_id);
+    assert_eq!(addr, cfg.registers.amps_config);
+    assert_eq!(vals, crate::modbus::encode_32bit_float(13.5).to_vec());
+}
+
+#[tokio::test]
+async fn poll_cycle_with_manual_mode_writes_current() {
+    let (tx, rx) = mpsc::unbounded_channel();
+    let mut d = crate::driver::AlfenDriver::new(rx, tx).await.unwrap();
+    // Setup readings
+    let cfg = d.config().clone();
+    let volt_regs = [230.0f32, 231.0, 229.0]
+        .into_iter()
+        .flat_map(regs_from_f32)
+        .collect::<Vec<_>>();
+    let curr_regs = [6.0f32, 7.0, 8.0]
+        .into_iter()
+        .flat_map(regs_from_f32)
+        .collect::<Vec<_>>();
+    let power_regs = [1200.0f32, 1300.0, 1400.0, 3900.0]
+        .into_iter()
+        .flat_map(regs_from_f32)
+        .collect::<Vec<_>>();
+    let energy_regs = regs_from_f64(0.0);
+    let status_regs = vec![0x4231, 0, 0, 0, 0]; // "B1" -> connected
+    let mock = MockModbus::new()
+        .with_read(
+            cfg.modbus.socket_slave_id,
+            cfg.registers.voltages,
+            6,
+            volt_regs,
+        )
+        .with_read(
+            cfg.modbus.socket_slave_id,
+            cfg.registers.currents,
+            6,
+            curr_regs,
+        )
+        .with_read(
+            cfg.modbus.socket_slave_id,
+            cfg.registers.power,
+            8,
+            power_regs,
+        )
+        .with_read(
+            cfg.modbus.socket_slave_id,
+            cfg.registers.energy,
+            4,
+            energy_regs,
+        )
+        .with_read(
+            cfg.modbus.socket_slave_id,
+            cfg.registers.status,
+            5,
+            status_regs,
+        )
+        .with_read(
+            cfg.modbus.station_slave_id,
+            cfg.registers.station_max_current,
+            2,
+            regs_from_f32(32.0),
+        );
+    d.modbus_manager = Some(Box::new(mock));
+    d.current_mode = crate::controls::ChargingMode::Manual;
+    d.start_stop = crate::controls::StartStopState::Enabled;
+    d.intended_set_current = 6.0;
+    d.poll_cycle().await.unwrap();
+    assert!((d.last_sent_current - 6.0).abs() < f32::EPSILON);
 }

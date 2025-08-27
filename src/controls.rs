@@ -87,24 +87,42 @@ impl ChargingControls {
                 };
                 amps.min(station_max_current)
             }
-            ChargingMode::Scheduled => {
-                // If Tibber integration is enabled, prefer dynamic pricing decisions
-                if config.tibber.enabled {
-                    let (should_charge, _explanation) =
-                        crate::tibber::check_tibber_schedule(&config.tibber)
-                            .await
-                            .unwrap_or((false, String::new()));
-                    if should_charge {
+            ChargingMode::Scheduled => match config.schedule.mode.as_str() {
+                "time" => {
+                    if Self::is_within_any_schedule(config) {
                         station_max_current
                     } else {
                         0.0
                     }
-                } else if Self::is_within_any_schedule(config) {
-                    station_max_current
-                } else {
-                    0.0
                 }
-            }
+                "tibber" => match crate::tibber::check_tibber_schedule(&config.tibber).await {
+                    Ok((tibber_allows, _)) => {
+                        if tibber_allows {
+                            station_max_current
+                        } else {
+                            0.0
+                        }
+                    }
+                    Err(err) => {
+                        self.logger.warn(&format!(
+                            "Tibber schedule check failed: {} — not charging",
+                            err
+                        ));
+                        0.0
+                    }
+                },
+                other => {
+                    self.logger.warn(&format!(
+                        "Unknown schedule.mode='{}' — defaulting to time-based schedule",
+                        other
+                    ));
+                    if Self::is_within_any_schedule(config) {
+                        station_max_current
+                    } else {
+                        0.0
+                    }
+                }
+            },
         };
 
         Ok(effective)
@@ -140,22 +158,42 @@ impl ChargingControls {
                 };
                 amps.min(station_max_current)
             }
-            ChargingMode::Scheduled => {
-                if config.tibber.enabled {
-                    let (should_charge, _explanation) =
-                        crate::tibber::check_tibber_schedule_blocking(&config.tibber)
-                            .unwrap_or((false, String::new()));
-                    if should_charge {
+            ChargingMode::Scheduled => match config.schedule.mode.as_str() {
+                "time" => {
+                    if Self::is_within_any_schedule(config) {
                         station_max_current
                     } else {
                         0.0
                     }
-                } else if Self::is_within_any_schedule(config) {
-                    station_max_current
-                } else {
-                    0.0
                 }
-            }
+                "tibber" => match crate::tibber::check_tibber_schedule_blocking(&config.tibber) {
+                    Ok((tibber_allows, _)) => {
+                        if tibber_allows {
+                            station_max_current
+                        } else {
+                            0.0
+                        }
+                    }
+                    Err(err) => {
+                        self.logger.warn(&format!(
+                            "Tibber schedule check failed (blocking): {} — not charging",
+                            err
+                        ));
+                        0.0
+                    }
+                },
+                other => {
+                    self.logger.warn(&format!(
+                        "Unknown schedule.mode='{}' — defaulting to time-based schedule",
+                        other
+                    ));
+                    if Self::is_within_any_schedule(config) {
+                        station_max_current
+                    } else {
+                        0.0
+                    }
+                }
+            },
         };
         Ok(effective)
     }
@@ -227,5 +265,104 @@ mod tests {
         assert_eq!(ChargingControls::parse_hhmm("23:59"), 23 * 60 + 59);
         assert_eq!(ChargingControls::parse_hhmm("24:00"), 0);
         assert_eq!(ChargingControls::parse_hhmm("bad"), 0);
+    }
+
+    fn make_config_active_now() -> crate::config::Config {
+        let mut cfg = crate::config::Config {
+            timezone: "UTC".to_string(),
+            ..crate::config::Config::default()
+        };
+        // Build a schedule item that is active for the current weekday and minute
+        let now = Utc::now();
+        let weekday = now.weekday().num_days_from_monday() as u8;
+        let start_min = now.minute().saturating_sub(1);
+        let end_min = (now.minute() + 1).min(59);
+        let start = format!("{:02}:{:02}", now.hour(), start_min);
+        let end = format!("{:02}:{:02}", now.hour(), end_min);
+        cfg.schedule.items.push(crate::config::ScheduleItem {
+            active: true,
+            days: vec![weekday],
+            start_time: start.clone(),
+            end_time: end.clone(),
+            enabled: 1,
+            days_mask: 0,
+            start,
+            end,
+        });
+        cfg
+    }
+
+    #[test]
+    fn schedule_active_now_returns_true() {
+        let cfg = make_config_active_now();
+        assert!(ChargingControls::is_schedule_active(&cfg));
+    }
+
+    #[test]
+    fn blocking_manual_and_auto_current() {
+        let controls = ChargingControls::new();
+        let mut cfg = crate::config::Config::default();
+        cfg.controls.min_set_current = 6.0;
+        // Manual clamps to station max
+        let manual = controls
+            .blocking_compute_effective_current(
+                ChargingMode::Manual,
+                StartStopState::Enabled,
+                40.0,
+                32.0,
+                0.0,
+                None,
+                &cfg,
+            )
+            .unwrap();
+        assert!((manual - 32.0).abs() < f32::EPSILON);
+
+        // Auto below threshold -> 0.0
+        let auto_low = controls
+            .blocking_compute_effective_current(
+                ChargingMode::Auto,
+                StartStopState::Enabled,
+                0.0,
+                32.0,
+                0.0,
+                Some(3000.0),
+                &cfg,
+            )
+            .unwrap();
+        assert_eq!(auto_low, 0.0);
+
+        // Auto above threshold -> watts/(3*230)
+        let watts = 5000.0f32;
+        let auto_high = controls
+            .blocking_compute_effective_current(
+                ChargingMode::Auto,
+                StartStopState::Enabled,
+                0.0,
+                32.0,
+                0.0,
+                Some(watts),
+                &cfg,
+            )
+            .unwrap();
+        let expected = watts / (3.0 * 230.0);
+        assert!((auto_high - expected).abs() < 0.01);
+    }
+
+    #[test]
+    fn blocking_scheduled_uses_schedule() {
+        let controls = ChargingControls::new();
+        let cfg = make_config_active_now();
+        let amps = controls
+            .blocking_compute_effective_current(
+                ChargingMode::Scheduled,
+                StartStopState::Enabled,
+                0.0,
+                20.0,
+                0.0,
+                None,
+                &cfg,
+            )
+            .unwrap();
+        assert_eq!(amps, 20.0);
     }
 }

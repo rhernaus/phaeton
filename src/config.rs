@@ -193,11 +193,28 @@ pub struct ScheduleItem {
 }
 
 /// Schedule configuration container
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
 pub struct ScheduleConfig {
+    /// Scheduling source: "time" (time-based windows) or "tibber" (price-based)
+    #[serde(default = "default_schedule_mode")]
+    pub mode: String,
+
     /// List of schedule items
     pub items: Vec<ScheduleItem>,
+}
+
+fn default_schedule_mode() -> String {
+    "time".to_string()
+}
+
+impl Default for ScheduleConfig {
+    fn default() -> Self {
+        Self {
+            mode: default_schedule_mode(),
+            items: Vec::new(),
+        }
+    }
 }
 
 /// Tibber API configuration
@@ -206,9 +223,6 @@ pub struct ScheduleConfig {
 pub struct TibberConfig {
     /// Tibber API access token
     pub access_token: String,
-
-    /// Whether Tibber integration is enabled
-    pub enabled: bool,
 
     /// Optional specific home ID
     pub home_id: String,
@@ -368,7 +382,6 @@ impl Default for TibberConfig {
     fn default() -> Self {
         Self {
             access_token: String::new(),
-            enabled: false,
             home_id: String::new(),
             charge_on_cheap: true,
             charge_on_very_cheap: true,
