@@ -373,3 +373,51 @@ async fn poll_cycle_with_manual_mode_writes_current() {
     d.poll_cycle().await.unwrap();
     assert!((d.last_sent_current - 6.0).abs() < f32::EPSILON);
 }
+
+#[tokio::test]
+async fn insufficient_solar_grace_timer_starts_and_expires() {
+    let (tx, rx) = mpsc::unbounded_channel();
+    let mut d = crate::driver::AlfenDriver::new(rx, tx).await.unwrap();
+
+    // Configure Auto mode and enabled charging
+    d.current_mode = crate::controls::ChargingMode::Auto;
+    d.start_stop = crate::controls::StartStopState::Enabled;
+
+    // Set EVSE minimum and a short grace period for the test via config update
+    let mut cfg = d.config().clone();
+    cfg.controls.min_set_current = 6.0;
+    cfg.controls.min_charge_duration_seconds = 2;
+    d.update_config(cfg).unwrap();
+
+    // Simulate that we were charging at >= min current
+    d.last_sent_current = 6.0;
+    d.last_set_current_monotonic = std::time::Instant::now();
+
+    // No PV available -> base effective would be 0.0
+    let (eff1, _soc) = d.compute_effective_current_with_soc(0.0, 0.0, 0.0).await;
+    // Grace timer should kick in and hold at min current
+    assert!((eff1 - 6.0).abs() < 0.01, "expected hold at min current");
+    assert!(d.min_charge_timer_deadline.is_some(), "timer should be set");
+
+    // Force timer expiry
+    d.min_charge_timer_deadline =
+        Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+
+    // Recompute under same insufficient PV conditions
+    let (eff2, _soc2) = d.compute_effective_current_with_soc(0.0, 0.0, 0.0).await;
+    // After expiry, allow stopping (0 A)
+    assert!(eff2 <= 0.01, "expected stop after timer expiry");
+    assert!(
+        d.min_charge_timer_deadline.is_none(),
+        "timer should clear after expiry"
+    );
+
+    // Now provide sufficient PV so base effective >= min -> timer should clear
+    let watts = 6000.0_f32; // ~8.7 A on 3 phases -> >= 6 A
+    let (eff3, _soc3) = d.compute_effective_current_with_soc(0.0, 0.0, watts).await;
+    assert!(eff3 >= 6.0, "sufficient PV should produce >= min current");
+    assert!(
+        d.min_charge_timer_deadline.is_none(),
+        "timer should be cleared when PV sufficient"
+    );
+}
