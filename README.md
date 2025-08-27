@@ -1,6 +1,6 @@
 # Phaeton - EV Charger Driver
 
-A high-performance EV charger driver for Victron Venus OS, providing seamless integration with Victron's D-Bus system and advanced features like dynamic pricing, vehicle integration, and self-updates.
+A high-performance EV charger driver for Victron Venus OS, providing seamless integration with Victron's D-Bus system and advanced features like dynamic pricing (feature-gated), vehicle integration (planned), and self-updates (stubbed).
 
 ## Features
 
@@ -9,7 +9,9 @@ A high-performance EV charger driver for Victron Venus OS, providing seamless in
 - **High Performance**: Async-first design with Tokio runtime
 - **Memory Safe**: Rust's ownership system prevents common bugs
 - **Modbus TCP**: Async client with reconnect/backoff and decoding utilities
-- **Web Interface**: Axum REST API, SSE events, logs endpoints; static UI served under `/ui` and `/app`; OpenAPI at `/openapi.json` and Swagger UI at `/docs`
+- **Web Interface**: Axum REST API, SSE events, logs endpoints; static UI served under `/ui` and `/app`
+- **OpenAPI/Docs (feature)**: When built with `--features openapi`, serve `/openapi.json` and Swagger UI at `/docs`
+- **Metrics**: Lightweight JSON metrics at `/api/metrics`
 - **D‑Bus Integration (core)**:
   - Service name `com.victronenergy.evcharger.phaeton_<instance>`
   - `com.victronenergy.BusItem` exposure for core paths (`/Mode`, `/StartStop`, `/SetCurrent`, `/Status`, power/energy/current/voltages)
@@ -28,7 +30,7 @@ A high-performance EV charger driver for Victron Venus OS, providing seamless in
 
 ### Planned / In progress
 
-- **Dynamic Pricing (Tibber)**: API client and pricing strategies
+- **Dynamic Pricing (Tibber)**: Implemented behind `tibber` feature; GraphQL pricing, caching, strategies (experimental)
 - **Vehicle Integration**: Tesla and Kia clients
 - **Self-Updates**: Git-based update check/apply
 - **D‑Bus**: Export full object tree (org.freedesktop.DBus.Properties) for complete Venus OS parity
@@ -124,21 +126,28 @@ Phaeton will automatically look for a configuration file at the following locati
 - `/data/phaeton_config.yaml`
 - `/etc/phaeton/config.yaml`
 
-You can also retrieve the JSON schema via the API at `/api/config/schema`.
+When built with the `openapi` feature, you can retrieve the JSON schema via the API at `/api/config/schema`.
+
+### Feature flags
+
+- Default: `web`, `dbus`
+- Optional: `openapi` (serve `/openapi.json` and `/docs`), `tibber` (enable Tibber), `compression` (gzip/br), `full` (all)
+
+```bash
+# Run with OpenAPI and Tibber enabled
+cargo run --features full
+
+# Build with just OpenAPI
+cargo build --release --features openapi
+```
 
 ### Development
 
 ```bash
-# Run tests
+# Common tasks
 cargo test
-
-# Run linter
 cargo clippy
-
-# Check formatting
 cargo fmt --check
-
-# Run security audit
 cargo audit
 ```
 
@@ -251,6 +260,7 @@ The application follows a modular architecture with clear separation of concerns
 ### REST API Endpoints (available)
 
 - `GET /api/health` - Health check
+- `GET /api/metrics` - Driver metrics
 - `GET /api/status` - Current system status
 - `POST /api/mode` - Change charging mode
 - `POST /api/startstop` - Start/stop charging
@@ -270,6 +280,7 @@ The application follows a modular architecture with clear separation of concerns
 
 ### OpenAPI / Swagger
 
+- Available only when built with the `openapi` feature
 - OpenAPI JSON: `/openapi.json`
 - Swagger UI: `/docs`
 
@@ -325,8 +336,7 @@ web:
 
 ### Tibber dynamic pricing
 
-When `tibber.enabled: true` and a valid `access_token` are configured, Scheduled mode will use Tibber prices
-to decide whether to enable charging for the current hour.
+When built with the `tibber` feature and `tibber.enabled: true` with a valid `access_token`, Scheduled mode will use Tibber prices to decide whether to enable charging for the current hour. Without the feature, Tibber-related helpers return stubbed responses.
 
 - strategy=level: charge on VERY_CHEAP/CHEAP based on `charge_on_*` flags
 - strategy=threshold: charge when current `total` <= `max_price_total`

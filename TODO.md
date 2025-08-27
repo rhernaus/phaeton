@@ -273,3 +273,22 @@ phaeton/
 **Phase 3: System Integration**
 - Expand D‑Bus property export to full object tree
 - Keep enriching web API (auth, rate limiting) and wire real updater/Tibber backends
+
+---
+
+## Priority Backlog (next up)
+
+- [ ] Implement Modbus write for `SetCurrent` in `ChargingControls::apply_current` and driver loop
+- [ ] D‑Bus: Export full object tree and writable items parity with Venus OS paths
+- [ ] Web security: add simple token-based auth and basic rate limiting
+- [ ] Updater: implement `GitUpdater::check_for_updates` and `apply_updates` using `git2` (feature-gated)
+- [ ] Tibber: finalize feature-gated client, error handling, and unit tests for strategies
+- [ ] Metrics: expose Prometheus endpoint `/metrics` (keep JSON metrics at `/api/metrics`)
+- [ ] Persistence: key-based storage for sessions and config revisions
+- [ ] Vehicle integrations: scaffold Tesla and Kia clients (feature-gated, no secrets in repo)
+- [ ] CI: ensure all-feature build matrix and publish artifacts with checksums
+- [ ] Docs: configuration reference and troubleshooting guide
+
+Notes:
+- Keep auth optional and off by default; document reverse proxy hardening
+- Prefer not to suppress clippy complexity; refactor if needed
