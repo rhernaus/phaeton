@@ -327,6 +327,89 @@ impl super::AlfenDriver {
         write_res.is_ok()
     }
 
+    async fn compute_effective_current_with_soc(
+        &mut self,
+        requested: f32,
+        now_secs: f64,
+        excess_pv_power_w: f32,
+    ) -> (f32, Option<bool>) {
+        let mut effective: f32 = self
+            .controls
+            .compute_effective_current(
+                self.current_mode,
+                self.start_stop,
+                requested,
+                self.station_max_current,
+                now_secs,
+                Some(excess_pv_power_w),
+                &self.config,
+            )
+            .await
+            .unwrap_or(0.0);
+
+        let mut soc_below_min: Option<bool> = None;
+        if matches!(self.start_stop, crate::controls::StartStopState::Enabled)
+            && (matches!(self.current_mode, crate::controls::ChargingMode::Auto)
+                || matches!(self.current_mode, crate::controls::ChargingMode::Scheduled))
+            && let Some((soc, min_limit)) = self.fetch_battery_soc_and_minimum_limit().await
+            && soc.is_finite()
+            && min_limit.is_finite()
+        {
+            soc_below_min = Some(soc < min_limit);
+            if soc < min_limit
+                && !matches!(self.current_mode, crate::controls::ChargingMode::Manual)
+            {
+                if effective > 0.0 {
+                    self.logger.info(&format!(
+                        "Stopping charging due to Low SOC: SoC={:.1}% < MinimumSocLimit={:.1}%",
+                        soc, min_limit
+                    ));
+                }
+                effective = 0.0;
+            }
+        }
+        (effective, soc_below_min)
+    }
+
+    fn apply_current_if_needed(
+        &mut self,
+        effective: f32,
+        excess_pv_power_w: f32,
+    ) -> (bool, bool, bool) {
+        let (should_update, need_change, interval_due) = self.should_send_update(effective);
+        if should_update {
+            if need_change {
+                let reason = self.current_mode_reason();
+                self.logger.info(&format!(
+                    "Adjusting available current: {:.2} A -> {:.2} A (reason={}, pv_excess={:.0} W, station_max={:.1} A)",
+                    self.last_sent_current, effective, reason, excess_pv_power_w, self.station_max_current
+                ));
+            } else if interval_due {
+                let reason = self.current_mode_reason();
+                self.logger.info(&format!(
+                    "Reasserting available current: {:.2} A (reason={}, pv_excess={:.0} W, station_max={:.1} A)",
+                    effective, reason, excess_pv_power_w, self.station_max_current
+                ));
+            }
+        }
+        (should_update, need_change, interval_due)
+    }
+
+    fn finalize_cycle(&mut self, m: &RealtimeMeasurements, cur_status: u8, effective: f32) {
+        self.handle_session_transition(cur_status, m.energy_kwh);
+        let _ = self.sessions.update(m.total_power, m.energy_kwh);
+        self.persist_state();
+        self.update_last_measurements(m);
+        self.logger.debug(&format!(
+            "V=({:.1},{:.1},{:.1})V I=({:.2},{:.2},{:.2})A P=({:.0},{:.0},{:.0})W total={:.0}W E={:.3}kWh status={} lag_ms={} last_sent_A={:.2}",
+            m.voltages.l1, m.voltages.l2, m.voltages.l3, m.currents.l1, m.currents.l2, m.currents.l3, m.powers.l1, m.powers.l2, m.powers.l3, m.total_power, m.energy_kwh, cur_status,
+            self.last_set_current_monotonic.elapsed().as_millis(), self.last_sent_current
+        ));
+        let _ = self
+            .status_tx
+            .send(self.build_status_json(effective, m.total_power));
+    }
+
     fn handle_session_transition(&mut self, cur_status: u8, energy_kwh: f64) {
         let prev_status = self.last_status;
         if cur_status == 2 && prev_status != 2 && self.sessions.current_session.is_none() {
@@ -388,7 +471,6 @@ impl super::AlfenDriver {
         status_obj.to_string()
     }
 
-    #[allow(clippy::cognitive_complexity)]
     pub(crate) async fn poll_cycle(&mut self) -> Result<()> {
         self.logger.debug("Starting poll cycle");
         if self.modbus_manager.is_some() {
@@ -405,58 +487,13 @@ impl super::AlfenDriver {
                 .calculate_excess_pv_power(ev_power_for_subtract)
                 .await
                 .unwrap_or(0.0);
-            let mut effective: f32 = self
-                .controls
-                .compute_effective_current(
-                    self.current_mode,
-                    self.start_stop,
-                    requested,
-                    self.station_max_current,
-                    now_secs,
-                    Some(excess_pv_power_w),
-                    &self.config,
-                )
-                .await
-                .unwrap_or(0.0);
+            let (effective, soc_below_min) = self
+                .compute_effective_current_with_soc(requested, now_secs, excess_pv_power_w)
+                .await;
 
-            // Fetch SoC once for both clamping and status derivation
-            let mut soc_below_min: Option<bool> = None;
-            if matches!(self.start_stop, crate::controls::StartStopState::Enabled)
-                && (matches!(self.current_mode, crate::controls::ChargingMode::Auto)
-                    || matches!(self.current_mode, crate::controls::ChargingMode::Scheduled))
-                && let Some((soc, min_limit)) = self.fetch_battery_soc_and_minimum_limit().await
-                && soc.is_finite()
-                && min_limit.is_finite()
-            {
-                soc_below_min = Some(soc < min_limit);
-                if soc < min_limit
-                    && !matches!(self.current_mode, crate::controls::ChargingMode::Manual)
-                {
-                    if effective > 0.0 {
-                        self.logger.info(&format!(
-                            "Stopping charging due to Low SOC: SoC={:.1}% < MinimumSocLimit={:.1}%",
-                            soc, min_limit
-                        ));
-                    }
-                    effective = 0.0;
-                }
-            }
-
-            let (should_update, need_change, interval_due) = self.should_send_update(effective);
+            let (should_update, _need_change, _interval_due) =
+                self.apply_current_if_needed(effective, excess_pv_power_w);
             if should_update {
-                if need_change {
-                    let reason = self.current_mode_reason();
-                    self.logger.info(&format!(
-                        "Adjusting available current: {:.2} A -> {:.2} A (reason={}, pv_excess={:.0} W, station_max={:.1} A)",
-                        self.last_sent_current, effective, reason, excess_pv_power_w, self.station_max_current
-                    ));
-                } else if interval_due {
-                    let reason = self.current_mode_reason();
-                    self.logger.info(&format!(
-                        "Reasserting available current: {:.2} A (reason={}, pv_excess={:.0} W, station_max={:.1} A)",
-                        effective, reason, excess_pv_power_w, self.station_max_current
-                    ));
-                }
                 if self.write_effective_current(effective).await {
                     self.last_sent_current = effective;
                     self.last_current_set_time = std::time::Instant::now();
@@ -468,22 +505,7 @@ impl super::AlfenDriver {
 
             // Derive final status from base status and context
             let derived_status = self.derive_status(m.status, soc_below_min) as u8;
-            let cur_status = derived_status;
-            self.handle_session_transition(cur_status, m.energy_kwh);
-
-            self.sessions.update(m.total_power, m.energy_kwh)?;
-            self.persist_state();
-            self.update_last_measurements(&m);
-
-            self.logger.debug(&format!(
-                "V=({:.1},{:.1},{:.1})V I=({:.2},{:.2},{:.2})A P=({:.0},{:.0},{:.0})W total={:.0}W E={:.3}kWh status={} lag_ms={} last_sent_A={:.2}",
-                m.voltages.l1, m.voltages.l2, m.voltages.l3, m.currents.l1, m.currents.l2, m.currents.l3, m.powers.l1, m.powers.l2, m.powers.l3, m.total_power, m.energy_kwh, cur_status,
-                self.last_set_current_monotonic.elapsed().as_millis(), self.last_sent_current
-            ));
-
-            let _ = self
-                .status_tx
-                .send(self.build_status_json(effective, m.total_power));
+            self.finalize_cycle(&m, derived_status, effective);
         }
 
         self.logger.debug("Poll cycle completed");
