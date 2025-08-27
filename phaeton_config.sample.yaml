@@ -43,11 +43,12 @@ logging:
   json_format: false
 
 schedule:
+  # Scheduling source: "time" (use windows below) or "tibber" (use Tibber pricing)
+  mode: "time"
   items: []
 
 tibber:
   access_token: ""
-  enabled: false
   home_id: ""
   charge_on_cheap: true
   charge_on_very_cheap: true

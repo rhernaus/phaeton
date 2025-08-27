@@ -48,36 +48,33 @@ impl super::AlfenDriver {
         let manager = self.modbus_manager.as_mut().unwrap();
 
         let manufacturer = manager
-            .execute_with_reconnect(|client| {
-                let id = self.config.modbus.station_slave_id;
-                let addr = self.config.registers.manufacturer;
-                let cnt = self.config.registers.manufacturer_count;
-                Box::pin(async move { client.read_holding_registers(id, addr, cnt).await })
-            })
+            .read_holding_registers(
+                self.config.modbus.station_slave_id,
+                self.config.registers.manufacturer,
+                self.config.registers.manufacturer_count,
+            )
             .await
             .ok()
             .map(|regs| crate::modbus::decode_string(&regs, None).unwrap_or_default())
             .unwrap_or_default();
 
         let firmware = manager
-            .execute_with_reconnect(|client| {
-                let id = self.config.modbus.station_slave_id;
-                let addr = self.config.registers.firmware_version;
-                let cnt = self.config.registers.firmware_version_count;
-                Box::pin(async move { client.read_holding_registers(id, addr, cnt).await })
-            })
+            .read_holding_registers(
+                self.config.modbus.station_slave_id,
+                self.config.registers.firmware_version,
+                self.config.registers.firmware_version_count,
+            )
             .await
             .ok()
             .map(|regs| crate::modbus::decode_string(&regs, None).unwrap_or_default())
             .unwrap_or_default();
 
         let serial = manager
-            .execute_with_reconnect(|client| {
-                let id = self.config.modbus.station_slave_id;
-                let addr = self.config.registers.station_serial;
-                let cnt = self.config.registers.station_serial_count;
-                Box::pin(async move { client.read_holding_registers(id, addr, cnt).await })
-            })
+            .read_holding_registers(
+                self.config.modbus.station_slave_id,
+                self.config.registers.station_serial,
+                self.config.registers.station_serial_count,
+            )
             .await
             .ok()
             .map(|regs| crate::modbus::decode_string(&regs, None).unwrap_or_default())

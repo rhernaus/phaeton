@@ -111,12 +111,7 @@ phaeton/
   - Auto mode (solar-based heuristic) ✅
   - Scheduled mode (timezone-aware windows) ✅
 - [x] **Add state persistence** for mode/start/stop/set_current + session snapshot
-- [ ] **Implement watchdog mechanisms** for fault tolerance
-- [ ] **Create event system** for status changes and notifications (beyond SSE)
 - [x] **Wire persistence and sessions** into the driver run loop
-- [ ] **Implement status mapping parity** (e.g., LOW_SOC, WAIT_* states)
-  - Current: Disconnected/Connected/Charging/Wait Sun/Wait Start/Low SOC
-  - Next: error states parity (ground fault, overtemp, etc.)
 
 ## 2.3 Session Management
 - [x] **Implement charging session tracking** with start/end detection
@@ -137,7 +132,6 @@ phaeton/
 - [x] **Normalize writes**: `/StartStop` (bool/num/string→0/1), `/Mode` (→0/1/2)
 - [x] **Eliminate D‑Bus handle races** with shared Arc<Mutex<DbusService>>
 - [ ] **Export complete object tree** with properties for all Venus OS paths (beyond cached reflection)
-- [ ] **Implement Victron energy rate detection** from system D‑Bus
 
 ## 3.2 Web Server & API
 - [x] **Migrate web framework**: fully migrated from `warp` to `axum` (no legacy code)
@@ -168,10 +162,9 @@ phaeton/
 - [ ] **Add multiple vehicle support** with individual configurations
 
 ## 4.3 Update Management
-- [ ] **Implement Git-based update checking** using `git2`
+- [ ] **Implement release update checking**
 - [ ] **Create update download** and verification system
 - [ ] **Add update scheduling** and automatic restarts
-- [ ] **Implement branch management** for different update channels
 - [ ] **Add update rollback** capability for failed deployments
 
 ---
@@ -206,7 +199,6 @@ phaeton/
 
 ## 6.1 Build System
 - [x] **Configure cross-compilation** scaffolding for ARM architecture
-- [ ] **Create Docker build** environment for consistent builds
 - [x] **Implement CI/CD pipeline** with automated testing and cross artifacts (GitHub Actions)
 - [ ] **Add binary packaging** for different target platforms
 
@@ -241,7 +233,6 @@ phaeton/
 
 ## Success Criteria
 - [ ] All existing Python functionality ported to Rust
-- [ ] Performance improvements (2-5x better resource usage)
 - [ ] Memory safety verified with comprehensive testing
 - [ ] Deployment on Venus OS with full D‑Bus integration
 - [ ] Web UI functional with all features working
@@ -273,3 +264,21 @@ phaeton/
 **Phase 3: System Integration**
 - Expand D‑Bus property export to full object tree
 - Keep enriching web API (auth, rate limiting) and wire real updater/Tibber backends
+
+---
+
+## Priority Backlog (next up)
+
+- [ ] Implement Modbus write for `SetCurrent` in `ChargingControls::apply_current` and driver loop
+- [ ] D‑Bus: Export full object tree and writable items parity with Venus OS paths
+- [ ] Web security: add simple token-based auth and basic rate limiting
+- [ ] Updater: implement `Updater::check_for_updates` and `apply_updates`
+- [ ] Tibber: finalize feature-gated client, error handling, and unit tests for strategies
+- [ ] Metrics: expose Prometheus endpoint `/metrics` (keep JSON metrics at `/api/metrics`)
+- [ ] Persistence: key-based storage for sessions and config revisions
+- [ ] Vehicle integrations: scaffold Tesla and Kia clients (feature-gated, no secrets in repo)
+- [ ] CI: ensure all-feature build matrix and publish artifacts with checksums
+- [ ] Docs: configuration reference and troubleshooting guide
+
+Notes:
+- Prefer not to suppress clippy complexity; refactor if needed

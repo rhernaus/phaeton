@@ -177,13 +177,7 @@ impl super::AlfenDriver {
         let addr_station_max = self.config.registers.station_max_current;
         let manager = self.modbus_manager.as_mut().unwrap();
         if let Ok(max_regs) = manager
-            .execute_with_reconnect(|client| {
-                Box::pin(async move {
-                    client
-                        .read_holding_registers(station_id, addr_station_max, 2)
-                        .await
-                })
-            })
+            .read_holding_registers(station_id, addr_station_max, 2)
             .await
             && max_regs.len() >= 2
             && let Ok(max_c) = crate::modbus::decode_32bit_float(&max_regs[0..2])
@@ -205,57 +199,27 @@ impl super::AlfenDriver {
         let manager = self.modbus_manager.as_mut().unwrap();
 
         let voltages = manager
-            .execute_with_reconnect(|client| {
-                Box::pin(async move {
-                    client
-                        .read_holding_registers(socket_id, addr_voltages, 6)
-                        .await
-                })
-            })
+            .read_holding_registers(socket_id, addr_voltages, 6)
             .await
             .ok();
 
         let currents = manager
-            .execute_with_reconnect(|client| {
-                Box::pin(async move {
-                    client
-                        .read_holding_registers(socket_id, addr_currents, 6)
-                        .await
-                })
-            })
+            .read_holding_registers(socket_id, addr_currents, 6)
             .await
             .ok();
 
         let power_regs = manager
-            .execute_with_reconnect(|client| {
-                Box::pin(async move {
-                    client
-                        .read_holding_registers(socket_id, addr_power, 8)
-                        .await
-                })
-            })
+            .read_holding_registers(socket_id, addr_power, 8)
             .await
             .ok();
 
         let energy_regs = manager
-            .execute_with_reconnect(|client| {
-                Box::pin(async move {
-                    client
-                        .read_holding_registers(socket_id, addr_energy, 4)
-                        .await
-                })
-            })
+            .read_holding_registers(socket_id, addr_energy, 4)
             .await
             .ok();
 
         let status_regs = manager
-            .execute_with_reconnect(|client| {
-                Box::pin(async move {
-                    client
-                        .read_holding_registers(socket_id, addr_status, 5)
-                        .await
-                })
-            })
+            .read_holding_registers(socket_id, addr_status, 5)
             .await
             .ok();
 
@@ -315,14 +279,7 @@ impl super::AlfenDriver {
             .modbus_manager
             .as_mut()
             .unwrap()
-            .execute_with_reconnect(|client| {
-                let regs_vec = vec![regs[0], regs[1]];
-                Box::pin(async move {
-                    client
-                        .write_multiple_registers(socket_id, addr_amps, &regs_vec)
-                        .await
-                })
-            })
+            .write_multiple_registers(socket_id, addr_amps, &regs)
             .await;
         write_res.is_ok()
     }

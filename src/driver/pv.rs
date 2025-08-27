@@ -28,3 +28,17 @@ impl super::AlfenDriver {
         Some(excess as f32)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::AlfenDriver;
+    use tokio::sync::mpsc;
+
+    #[tokio::test]
+    async fn calculate_excess_returns_none_without_dbus() {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let d = AlfenDriver::new(rx, tx).await.unwrap();
+        // No D-Bus attached -> None
+        assert!(d.calculate_excess_pv_power(0.0).await.is_none());
+    }
+}

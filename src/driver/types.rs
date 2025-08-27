@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Main driver state
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum DriverState {
     /// Driver is initializing
     Initializing,
