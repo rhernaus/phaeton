@@ -385,6 +385,26 @@ impl DbusService {
 
         Ok(crate::dbus::items::BusItem::owned_value_to_serde(&val))
     }
+
+    /// List available D-Bus service names that start with the provided prefix
+    pub async fn list_service_names_with_prefix(&self, prefix: &str) -> Result<Vec<String>> {
+        let conn = match &self.connection {
+            Some(c) => c,
+            None => return Err(PhaetonError::dbus("No D-Bus connection available")),
+        };
+        let proxy = zbus::fdo::DBusProxy::new(conn)
+            .await
+            .map_err(|e| PhaetonError::dbus(format!("DBusProxy creation failed: {}", e)))?;
+        let names = proxy
+            .list_names()
+            .await
+            .map_err(|e| PhaetonError::dbus(format!("ListNames failed: {}", e)))?;
+        Ok(names
+            .into_iter()
+            .map(|n| n.to_string())
+            .filter(|n| n.starts_with(prefix))
+            .collect())
+    }
 }
 
 #[cfg(test)]

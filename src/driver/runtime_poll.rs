@@ -93,23 +93,83 @@ impl super::AlfenDriver {
         0
     }
 
-    fn adjust_connected_status(&self, status_base: i32) -> i32 {
-        let mut status = status_base;
+    /// Derive Victron-esque status from base hardware status and current context.
+    ///
+    /// Rule order (highest precedence first):
+    /// - StartStop=Stopped -> 6 (Wait start)
+    /// - Scheduled mode with inactive window -> 6 (Wait start)
+    /// - Auto or Scheduled with Low SoC -> 7 (Low SOC)
+    /// - Auto with near-zero current -> 4 (Wait sun)
+    /// - Fallback to base (0/1/2)
+    fn derive_status(&self, status_base: i32, soc_below_min: Option<bool>) -> i32 {
         let connected = status_base == 1 || status_base == 2;
-        if connected {
-            if matches!(self.start_stop, crate::controls::StartStopState::Stopped) {
-                status = 6;
-            } else if matches!(self.current_mode, crate::controls::ChargingMode::Auto) {
-                if self.last_sent_current < 0.1 {
-                    status = 4;
-                }
-            } else if matches!(self.current_mode, crate::controls::ChargingMode::Scheduled)
-                && !crate::controls::ChargingControls::is_schedule_active(&self.config)
-            {
-                status = 6;
+        if !connected {
+            return status_base;
+        }
+
+        // Wait start due to explicit stop
+        if matches!(self.start_stop, crate::controls::StartStopState::Stopped) {
+            return 6;
+        }
+
+        // Low SOC for Auto and Scheduled (Manual continues)
+        if (matches!(self.current_mode, crate::controls::ChargingMode::Auto)
+            || matches!(self.current_mode, crate::controls::ChargingMode::Scheduled))
+            && soc_below_min == Some(true)
+        {
+            return 7;
+        }
+
+        // Wait start due to inactive schedule window
+        if matches!(self.current_mode, crate::controls::ChargingMode::Scheduled)
+            && !crate::controls::ChargingControls::is_schedule_active(&self.config)
+        {
+            return 6;
+        }
+
+        // Wait sun when Auto but not currently charging / near-zero available
+        if matches!(self.current_mode, crate::controls::ChargingMode::Auto)
+            && self.last_sent_current < 0.1
+        {
+            return 4;
+        }
+
+        status_base
+    }
+
+    async fn fetch_battery_soc_and_minimum_limit(&self) -> Option<(f64, f64)> {
+        let dbus_guard = self.dbus.as_ref()?.lock().await;
+        // Read battery SoC from com.victronenergy.system
+        async fn get_f64(svc: &crate::dbus::DbusService, service: &str, path: &str) -> Option<f64> {
+            match svc.read_remote_value(service, path).await {
+                Ok(v) => v
+                    .as_f64()
+                    .or_else(|| v.as_i64().map(|x| x as f64))
+                    .or_else(|| v.as_u64().map(|x| x as f64)),
+                Err(_) => None,
             }
         }
-        status
+
+        let soc_opt = get_f64(&dbus_guard, "com.victronenergy.system", "/Dc/Battery/Soc").await;
+        let soc = match soc_opt {
+            Some(s) if s.is_finite() => s,
+            _ => return None,
+        };
+
+        // Find MinimumSocLimit from any com.victronenergy.multi.* device
+        let names = dbus_guard
+            .list_service_names_with_prefix("com.victronenergy.multi")
+            .await
+            .unwrap_or_default();
+        for svc_name in names {
+            if let Some(min) =
+                get_f64(&dbus_guard, &svc_name, "/Settings/Ess/MinimumSocLimit").await
+                && min.is_finite()
+            {
+                return Some((soc, min));
+            }
+        }
+        None
     }
 
     async fn update_station_max_current_from_modbus(&mut self) {
@@ -206,8 +266,7 @@ impl super::AlfenDriver {
         let (powers_triplet, total_power) =
             Self::decode_powers(&power_regs, &voltages_triplet, &currents_triplet);
         let energy_kwh = Self::decode_energy_kwh(&energy_regs);
-        let status_base = Self::compute_status_from_regs(&status_regs);
-        let status = self.adjust_connected_status(status_base);
+        let status = Self::compute_status_from_regs(&status_regs);
 
         RealtimeMeasurements {
             voltages: voltages_triplet,
@@ -266,6 +325,95 @@ impl super::AlfenDriver {
             })
             .await;
         write_res.is_ok()
+    }
+
+    async fn compute_effective_current_with_soc(
+        &mut self,
+        requested: f32,
+        now_secs: f64,
+        excess_pv_power_w: f32,
+    ) -> (f32, Option<bool>) {
+        let mut effective: f32 = self
+            .controls
+            .compute_effective_current(
+                self.current_mode,
+                self.start_stop,
+                requested,
+                self.station_max_current,
+                now_secs,
+                Some(excess_pv_power_w),
+                &self.config,
+            )
+            .await
+            .unwrap_or(0.0);
+
+        let mut soc_below_min: Option<bool> = None;
+        if matches!(self.start_stop, crate::controls::StartStopState::Enabled)
+            && (matches!(self.current_mode, crate::controls::ChargingMode::Auto)
+                || matches!(self.current_mode, crate::controls::ChargingMode::Scheduled))
+            && let Some((soc, min_limit)) = self.fetch_battery_soc_and_minimum_limit().await
+            && soc.is_finite()
+            && min_limit.is_finite()
+        {
+            soc_below_min = Some(soc < min_limit);
+            if soc < min_limit
+                && !matches!(self.current_mode, crate::controls::ChargingMode::Manual)
+            {
+                if effective > 0.0 {
+                    self.logger.info(&format!(
+                        "Stopping charging due to Low SOC: SoC={:.1}% < MinimumSocLimit={:.1}%",
+                        soc, min_limit
+                    ));
+                }
+                effective = 0.0;
+            }
+        }
+        (effective, soc_below_min)
+    }
+
+    fn apply_current_if_needed(
+        &mut self,
+        effective: f32,
+        excess_pv_power_w: f32,
+    ) -> (bool, bool, bool) {
+        let (should_update, need_change, interval_due) = self.should_send_update(effective);
+        if should_update {
+            if need_change {
+                let reason = self.current_mode_reason();
+                self.logger.info(&format!(
+                    "Adjusting available current: {:.2} A -> {:.2} A (reason={}, pv_excess={:.0} W, station_max={:.1} A)",
+                    self.last_sent_current, effective, reason, excess_pv_power_w, self.station_max_current
+                ));
+            } else if interval_due {
+                let reason = self.current_mode_reason();
+                self.logger.info(&format!(
+                    "Reasserting available current: {:.2} A (reason={}, pv_excess={:.0} W, station_max={:.1} A)",
+                    effective, reason, excess_pv_power_w, self.station_max_current
+                ));
+            }
+        }
+        (should_update, need_change, interval_due)
+    }
+
+    fn finalize_cycle(
+        &mut self,
+        m: &RealtimeMeasurements,
+        cur_status: u8,
+        effective: f32,
+    ) -> Result<()> {
+        self.handle_session_transition(cur_status, m.energy_kwh);
+        self.sessions.update(m.total_power, m.energy_kwh)?;
+        self.persist_state();
+        self.update_last_measurements(m);
+        self.logger.debug(&format!(
+            "V=({:.1},{:.1},{:.1})V I=({:.2},{:.2},{:.2})A P=({:.0},{:.0},{:.0})W total={:.0}W E={:.3}kWh status={} lag_ms={} last_sent_A={:.2}",
+            m.voltages.l1, m.voltages.l2, m.voltages.l3, m.currents.l1, m.currents.l2, m.currents.l3, m.powers.l1, m.powers.l2, m.powers.l3, m.total_power, m.energy_kwh, cur_status,
+            self.last_set_current_monotonic.elapsed().as_millis(), self.last_sent_current
+        ));
+        let _ = self
+            .status_tx
+            .send(self.build_status_json(effective, m.total_power));
+        Ok(())
     }
 
     fn handle_session_transition(&mut self, cur_status: u8, energy_kwh: f64) {
@@ -345,35 +493,13 @@ impl super::AlfenDriver {
                 .calculate_excess_pv_power(ev_power_for_subtract)
                 .await
                 .unwrap_or(0.0);
-            let effective: f32 = self
-                .controls
-                .compute_effective_current(
-                    self.current_mode,
-                    self.start_stop,
-                    requested,
-                    self.station_max_current,
-                    now_secs,
-                    Some(excess_pv_power_w),
-                    &self.config,
-                )
-                .await
-                .unwrap_or(0.0);
+            let (effective, soc_below_min) = self
+                .compute_effective_current_with_soc(requested, now_secs, excess_pv_power_w)
+                .await;
 
-            let (should_update, need_change, interval_due) = self.should_send_update(effective);
+            let (should_update, _need_change, _interval_due) =
+                self.apply_current_if_needed(effective, excess_pv_power_w);
             if should_update {
-                if need_change {
-                    let reason = self.current_mode_reason();
-                    self.logger.info(&format!(
-                        "Adjusting available current: {:.2} A -> {:.2} A (reason={}, pv_excess={:.0} W, station_max={:.1} A)",
-                        self.last_sent_current, effective, reason, excess_pv_power_w, self.station_max_current
-                    ));
-                } else if interval_due {
-                    let reason = self.current_mode_reason();
-                    self.logger.info(&format!(
-                        "Reasserting available current: {:.2} A (reason={}, pv_excess={:.0} W, station_max={:.1} A)",
-                        effective, reason, excess_pv_power_w, self.station_max_current
-                    ));
-                }
                 if self.write_effective_current(effective).await {
                     self.last_sent_current = effective;
                     self.last_current_set_time = std::time::Instant::now();
@@ -383,22 +509,9 @@ impl super::AlfenDriver {
                 }
             }
 
-            let cur_status = m.status as u8;
-            self.handle_session_transition(cur_status, m.energy_kwh);
-
-            self.sessions.update(m.total_power, m.energy_kwh)?;
-            self.persist_state();
-            self.update_last_measurements(&m);
-
-            self.logger.debug(&format!(
-                "V=({:.1},{:.1},{:.1})V I=({:.2},{:.2},{:.2})A P=({:.0},{:.0},{:.0})W total={:.0}W E={:.3}kWh status={} lag_ms={} last_sent_A={:.2}",
-                m.voltages.l1, m.voltages.l2, m.voltages.l3, m.currents.l1, m.currents.l2, m.currents.l3, m.powers.l1, m.powers.l2, m.powers.l3, m.total_power, m.energy_kwh, m.status,
-                self.last_set_current_monotonic.elapsed().as_millis(), self.last_sent_current
-            ));
-
-            let _ = self
-                .status_tx
-                .send(self.build_status_json(effective, m.total_power));
+            // Derive final status from base status and context
+            let derived_status = self.derive_status(m.status, soc_below_min) as u8;
+            self.finalize_cycle(&m, derived_status, effective)?;
         }
 
         self.logger.debug("Poll cycle completed");
@@ -409,160 +522,4 @@ impl super::AlfenDriver {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use tokio::sync::mpsc;
-
-    // helper kept if needed later
-
-    #[test]
-    fn decode_triplet_handles_none_and_short() {
-        // None -> zeros
-        let t = crate::driver::AlfenDriver::decode_triplet(&None);
-        assert_eq!((t.l1, t.l2, t.l3), (0.0, 0.0, 0.0));
-        // Too short -> zeros
-        let regs = Some(vec![0u16; 4]);
-        let t2 = crate::driver::AlfenDriver::decode_triplet(&regs);
-        assert_eq!((t2.l1, t2.l2, t2.l3), (0.0, 0.0, 0.0));
-    }
-
-    #[test]
-    fn decode_triplet_parses_values() {
-        // Three f32 values: 230.0, 231.5, 229.4
-        let a = 230.0f32.to_be_bytes();
-        let b = 231.5f32.to_be_bytes();
-        let c = 229.4f32.to_be_bytes();
-        let regs = vec![
-            ((a[0] as u16) << 8) | a[1] as u16,
-            ((a[2] as u16) << 8) | a[3] as u16,
-            ((b[0] as u16) << 8) | b[1] as u16,
-            ((b[2] as u16) << 8) | b[3] as u16,
-            ((c[0] as u16) << 8) | c[1] as u16,
-            ((c[2] as u16) << 8) | c[3] as u16,
-        ];
-        let t = crate::driver::AlfenDriver::decode_triplet(&Some(regs));
-        assert!((t.l1 - 230.0).abs() < 0.01);
-        assert!((t.l2 - 231.5).abs() < 0.01);
-        assert!((t.l3 - 229.4).abs() < 0.01);
-    }
-
-    #[test]
-    fn decode_energy_kwh_handles_inputs() {
-        // None -> 0
-        assert_eq!(crate::driver::AlfenDriver::decode_energy_kwh(&None), 0.0);
-        // Too short -> 0
-        assert_eq!(
-            crate::driver::AlfenDriver::decode_energy_kwh(&Some(vec![0u16; 2])),
-            0.0
-        );
-        // Valid 64-bit float (e.g., 1234.0 Wh -> 1.234 kWh after division)
-        let val: f64 = 1234.0;
-        let be = val.to_be_bytes();
-        let regs = vec![
-            ((be[0] as u16) << 8) | be[1] as u16,
-            ((be[2] as u16) << 8) | be[3] as u16,
-            ((be[4] as u16) << 8) | be[5] as u16,
-            ((be[6] as u16) << 8) | be[7] as u16,
-        ];
-        let kwh = crate::driver::AlfenDriver::decode_energy_kwh(&Some(regs));
-        assert!((kwh - 1.234).abs() < 1e-9);
-    }
-
-    #[test]
-    fn decode_powers_approximates_when_small() {
-        // Provide near-zero power regs so approximation kicks in using v*i rounded
-        let p_regs = Some(vec![0u16; 8]);
-        let voltages = LineTriplet {
-            l1: 230.0,
-            l2: 231.0,
-            l3: 229.0,
-        };
-        let currents = LineTriplet {
-            l1: 5.0,
-            l2: 6.0,
-            l3: 7.0,
-        };
-        let (p_triplet, total) =
-            crate::driver::AlfenDriver::decode_powers(&p_regs, &voltages, &currents);
-        assert_eq!(p_triplet.l1, (230.0_f64 * 5.0_f64).round());
-        assert_eq!(p_triplet.l2, (231.0_f64 * 6.0_f64).round());
-        assert_eq!(p_triplet.l3, (229.0_f64 * 7.0_f64).round());
-        assert_eq!(total, p_triplet.l1 + p_triplet.l2 + p_triplet.l3);
-    }
-
-    #[test]
-    fn compute_status_from_regs_maps_strings() {
-        // Build registers for string "C2\0\0\0\0"
-        let regs = vec![0x4332, 0x0000, 0x0000, 0x0000, 0x0000];
-        let s = crate::driver::AlfenDriver::compute_status_from_regs(&Some(regs));
-        assert_eq!(s, 2);
-        // "B1" -> 1
-        let regs_b1 = vec![0x4231, 0, 0, 0, 0];
-        assert_eq!(
-            crate::driver::AlfenDriver::compute_status_from_regs(&Some(regs_b1)),
-            1
-        );
-        // Unknown -> 0
-        let regs_xx = vec![0x5858, 0, 0, 0, 0];
-        assert_eq!(
-            crate::driver::AlfenDriver::compute_status_from_regs(&Some(regs_xx)),
-            0
-        );
-    }
-
-    #[tokio::test]
-    async fn adjust_connected_status_variants() {
-        let (tx, rx) = mpsc::unbounded_channel();
-        let mut d = crate::driver::AlfenDriver::new(rx, tx).await.unwrap();
-
-        // Base 1 (connected) with Stopped -> 6
-        d.start_stop = crate::controls::StartStopState::Stopped;
-        d.current_mode = crate::controls::ChargingMode::Manual;
-        d.last_sent_current = 0.0;
-        assert_eq!(d.adjust_connected_status(1), 6);
-
-        // Auto mode with near-zero last current -> 4
-        d.start_stop = crate::controls::StartStopState::Enabled;
-        d.current_mode = crate::controls::ChargingMode::Auto;
-        d.last_sent_current = 0.05;
-        assert_eq!(d.adjust_connected_status(1), 4);
-    }
-
-    #[tokio::test]
-    async fn ev_power_for_subtract_and_should_send_update() {
-        let (tx, rx) = mpsc::unbounded_channel();
-        let mut d = crate::driver::AlfenDriver::new(rx, tx).await.unwrap();
-
-        d.last_sent_current = 10.0; // A
-        d.last_set_current_monotonic = std::time::Instant::now();
-        // Within lag -> compute from last current
-        let ev_sub = d.ev_power_for_subtract(1234.0);
-        assert!(ev_sub >= 10.0 * 230.0 * 3.0 - 1.0);
-
-        // Force watchdog satisfied
-        d.last_current_set_time = std::time::Instant::now()
-            - std::time::Duration::from_millis(
-                d.config.controls.current_update_interval as u64 + 10,
-            );
-        // Need change large enough
-        d.last_sent_current = 10.0;
-        let (should, need_change, _) = d.should_send_update(10.3);
-        assert!(should && need_change);
-
-        // No change, but watchdog still triggers
-        let (should2, need_change2, _) = d.should_send_update(10.05);
-        assert!(should2 && !need_change2);
-    }
-
-    #[tokio::test]
-    async fn current_mode_reason_strings() {
-        let (tx, rx) = mpsc::unbounded_channel();
-        let mut d = crate::driver::AlfenDriver::new(rx, tx).await.unwrap();
-        d.current_mode = crate::controls::ChargingMode::Manual;
-        assert_eq!(d.current_mode_reason(), "manual");
-        d.current_mode = crate::controls::ChargingMode::Auto;
-        assert_eq!(d.current_mode_reason(), "pv_auto");
-        d.current_mode = crate::controls::ChargingMode::Scheduled;
-        assert_eq!(d.current_mode_reason(), "scheduled");
-    }
-}
+mod tests;
