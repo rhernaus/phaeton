@@ -422,11 +422,8 @@ impl TibberClient {
         }
     }
 
-    /// Non-feature stub
-    #[cfg(not(feature = "tibber"))]
-    async fn refresh_if_due(&mut self) -> Result<Option<()>> {
-        Ok(None)
-    }
+    // Note: when the `tibber` feature is disabled, `refresh_if_due` is not compiled
+    // because all call sites are feature-gated.
 }
 
 // Shared client across calls for caching
@@ -520,6 +517,16 @@ pub async fn check_tibber_schedule(cfg: &crate::config::TibberConfig) -> Result<
     Ok((should, explanation))
 }
 
+/// Synchronous wrapper for `check_tibber_schedule` for non-async call sites
+#[cfg(feature = "tibber")]
+pub fn check_tibber_schedule_blocking(cfg: &crate::config::TibberConfig) -> Result<(bool, String)> {
+    // Build a lightweight single-threaded runtime to execute the async check
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    rt.block_on(check_tibber_schedule(cfg))
+}
+
 /// Convenience wrapper to get a textual overview (refreshes cache)
 #[cfg(feature = "tibber")]
 pub async fn get_hourly_overview_text(cfg: &crate::config::TibberConfig) -> Result<String> {
@@ -553,6 +560,13 @@ pub async fn get_hourly_overview_text(cfg: &crate::config::TibberConfig) -> Resu
 /// Fallback stubs when Tibber feature is disabled
 #[cfg(not(feature = "tibber"))]
 pub async fn check_tibber_schedule(_cfg: &crate::config::TibberConfig) -> Result<(bool, String)> {
+    Ok((false, "Tibber integration disabled".to_string()))
+}
+
+#[cfg(not(feature = "tibber"))]
+pub fn check_tibber_schedule_blocking(
+    _cfg: &crate::config::TibberConfig,
+) -> Result<(bool, String)> {
     Ok((false, "Tibber integration disabled".to_string()))
 }
 
