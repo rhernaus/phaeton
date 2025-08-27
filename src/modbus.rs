@@ -518,6 +518,18 @@ mod tests {
         assert!(ModbusConnectionManager::is_connection_error(
             &PhaetonError::timeout("timed out")
         ));
+        assert!(ModbusConnectionManager::is_connection_error(
+            &PhaetonError::modbus("Broken pipe (os error 32)")
+        ));
+        assert!(ModbusConnectionManager::is_connection_error(
+            &PhaetonError::modbus("not connected to peer")
+        ));
+        assert!(ModbusConnectionManager::is_connection_error(
+            &PhaetonError::modbus("unexpected EOF during read")
+        ));
+        assert!(ModbusConnectionManager::is_connection_error(
+            &PhaetonError::modbus("client disconnected")
+        ));
         assert!(!ModbusConnectionManager::is_connection_error(
             &PhaetonError::modbus("CRC error")
         ));
