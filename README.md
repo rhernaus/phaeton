@@ -285,7 +285,7 @@ The application follows a modular architecture with clear separation of concerns
 
 ### Known limitations
 
-- Tibber, vehicle integrations, and updater are stubbed (not yet implemented).
+- Vehicle integrations and updater are partially stubbed; expand as needed.
 - D‑Bus export covers core paths; full Venus OS tree still pending.
 - API is unauthenticated; do not expose directly to untrusted networks.
 - Auto‑mode thresholds are heuristic; configuration knobs exist, but further tuning is planned.
@@ -311,12 +311,28 @@ logging:
 tibber:
   enabled: false
   access_token: ""
-  strategy: level
+  home_id: ""       # Optional; default is first home on the account
+  charge_on_cheap: true
+  charge_on_very_cheap: true
+  strategy: level    # level | threshold | percentile
+  max_price_total: 0.0        # used when strategy=threshold
+  cheap_percentile: 0.30      # fraction (0..1) when strategy=percentile
 
 web:
   host: "127.0.0.1"
   port: 8088
 ```
+
+### Tibber dynamic pricing
+
+When `tibber.enabled: true` and a valid `access_token` are configured, Scheduled mode will use Tibber prices
+to decide whether to enable charging for the current hour.
+
+- strategy=level: charge on VERY_CHEAP/CHEAP based on `charge_on_*` flags
+- strategy=threshold: charge when current `total` <= `max_price_total`
+- strategy=percentile: compute a threshold over upcoming prices by percentile and charge when current <= threshold
+
+You can also fetch a human-readable hourly overview via the web logs or by wiring `tibber::get_hourly_overview_text`.
 
 ## Deployment
 

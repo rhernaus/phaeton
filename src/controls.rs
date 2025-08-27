@@ -88,7 +88,18 @@ impl ChargingControls {
                 amps.min(station_max_current)
             }
             ChargingMode::Scheduled => {
-                if Self::is_within_any_schedule(config) {
+                // If Tibber integration is enabled, prefer dynamic pricing decisions
+                if config.tibber.enabled {
+                    let (should_charge, _explanation) =
+                        crate::tibber::check_tibber_schedule(&config.tibber)
+                            .await
+                            .unwrap_or((false, String::new()));
+                    if should_charge {
+                        station_max_current
+                    } else {
+                        0.0
+                    }
+                } else if Self::is_within_any_schedule(config) {
                     station_max_current
                 } else {
                     0.0
