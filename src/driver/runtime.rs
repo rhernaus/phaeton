@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio::time::{Duration, interval};
@@ -7,7 +8,7 @@ use crate::error::Result;
 use super::types::DriverSnapshot;
 
 impl super::AlfenDriver {
-    /// Create a new driver instance
+    /// Create a new driver instance using configuration loaded from defaults.
     pub async fn new(
         commands_rx: mpsc::UnboundedReceiver<super::types::DriverCommand>,
         commands_tx: mpsc::UnboundedSender<super::types::DriverCommand>,
@@ -16,7 +17,31 @@ impl super::AlfenDriver {
             eprintln!("Failed to load configuration: {}", e);
             e
         })?;
+        Self::new_with_config(commands_rx, commands_tx, config).await
+    }
 
+    /// Create a new driver instance using an optional override config path.
+    /// When `config_path_override` is `Some`, the file must exist and be valid,
+    /// otherwise an error is returned without falling back to defaults.
+    pub async fn new_with_config_override(
+        commands_rx: mpsc::UnboundedReceiver<super::types::DriverCommand>,
+        commands_tx: mpsc::UnboundedSender<super::types::DriverCommand>,
+        config_path_override: Option<PathBuf>,
+    ) -> Result<Self> {
+        let config = crate::config::Config::load_with_override(config_path_override.as_deref())
+            .map_err(|e| {
+                eprintln!("Failed to load configuration: {}", e);
+                e
+            })?;
+        Self::new_with_config(commands_rx, commands_tx, config).await
+    }
+
+    /// Internal constructor that builds the driver from a provided Config.
+    async fn new_with_config(
+        commands_rx: mpsc::UnboundedReceiver<super::types::DriverCommand>,
+        commands_tx: mpsc::UnboundedSender<super::types::DriverCommand>,
+        config: crate::config::Config,
+    ) -> Result<Self> {
         // Initialize logging
         crate::logging::init_logging(&config.logging)?;
 

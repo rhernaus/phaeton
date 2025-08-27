@@ -1,19 +1,45 @@
 use anyhow::Result;
 use phaeton::driver::{AlfenDriver, DriverCommand};
 use phaeton::web;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc};
+use tracing::warn;
 use tracing::{error, info};
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Parse CLI arguments
+    let mut args = std::env::args().skip(1);
+    let mut config_path_override: Option<PathBuf> = None;
+    while let Some(arg) = args.next() {
+        if arg == "--help" || arg == "-h" {
+            println!(
+                "Usage: phaeton [--config <path>]\n\n  --config, -c <path>  Path to YAML config file (no fallback)\n  --help, -h           Show this help"
+            );
+            return Ok(());
+        } else if arg == "--config" || arg == "-c" {
+            if let Some(val) = args.next() {
+                config_path_override = Some(PathBuf::from(val));
+            } else {
+                eprintln!("Error: --config requires a file path\nTry --help for usage.");
+                std::process::exit(2);
+            }
+        } else if let Some(v) = arg.strip_prefix("--config=") {
+            config_path_override = Some(PathBuf::from(v));
+        } else {
+            warn!("Unknown argument ignored: {}", arg);
+        }
+    }
+
     // Create driver command channel
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<DriverCommand>();
 
-    // Initialize the driver with command receiver
-    let driver = AlfenDriver::new(cmd_rx, cmd_tx.clone())
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to create driver: {}", e))?;
+    // Initialize the driver with optional config override
+    let driver =
+        AlfenDriver::new_with_config_override(cmd_rx, cmd_tx.clone(), config_path_override)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to create driver: {}", e))?;
 
     info!("Phaeton EV Charger Driver starting up");
 
