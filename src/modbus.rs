@@ -403,6 +403,8 @@ impl ModbusConnectionManager {
                                 "Operation failed due to connection error after {} attempts: {} (giving up)",
                                 attempts, e
                             ));
+                            // Ensure we don't leave a stale client around so the next call reconnects
+                            self.client.disconnect().await.ok();
                             return Err(e);
                         }
                         if attempts % 10 == 0 {
@@ -435,10 +437,17 @@ impl ModbusConnectionManager {
     pub(crate) fn is_connection_error(error: &PhaetonError) -> bool {
         match error {
             PhaetonError::Modbus { message: msg } => {
-                msg.contains("connection")
-                    || msg.contains("Connection")
-                    || msg.contains("timeout")
-                    || msg.contains("disconnected")
+                // Normalize for simpler substring checks
+                let m = msg.to_lowercase();
+                m.contains("connection")
+                    || m.contains("timeout")
+                    || m.contains("disconnected")
+                    || m.contains("broken pipe")
+                    || m.contains("reset by peer")
+                    || m.contains("connection refused")
+                    || m.contains("connection aborted")
+                    || m.contains("not connected")
+                    || m.contains("eof")
             }
             PhaetonError::Timeout { message: _ } => true,
             _ => false,
@@ -508,6 +517,18 @@ mod tests {
         ));
         assert!(ModbusConnectionManager::is_connection_error(
             &PhaetonError::timeout("timed out")
+        ));
+        assert!(ModbusConnectionManager::is_connection_error(
+            &PhaetonError::modbus("Broken pipe (os error 32)")
+        ));
+        assert!(ModbusConnectionManager::is_connection_error(
+            &PhaetonError::modbus("not connected to peer")
+        ));
+        assert!(ModbusConnectionManager::is_connection_error(
+            &PhaetonError::modbus("unexpected EOF during read")
+        ));
+        assert!(ModbusConnectionManager::is_connection_error(
+            &PhaetonError::modbus("client disconnected")
         ));
         assert!(!ModbusConnectionManager::is_connection_error(
             &PhaetonError::modbus("CRC error")
