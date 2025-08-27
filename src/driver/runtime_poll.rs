@@ -395,9 +395,14 @@ impl super::AlfenDriver {
         (should_update, need_change, interval_due)
     }
 
-    fn finalize_cycle(&mut self, m: &RealtimeMeasurements, cur_status: u8, effective: f32) {
+    fn finalize_cycle(
+        &mut self,
+        m: &RealtimeMeasurements,
+        cur_status: u8,
+        effective: f32,
+    ) -> Result<()> {
         self.handle_session_transition(cur_status, m.energy_kwh);
-        let _ = self.sessions.update(m.total_power, m.energy_kwh);
+        self.sessions.update(m.total_power, m.energy_kwh)?;
         self.persist_state();
         self.update_last_measurements(m);
         self.logger.debug(&format!(
@@ -408,6 +413,7 @@ impl super::AlfenDriver {
         let _ = self
             .status_tx
             .send(self.build_status_json(effective, m.total_power));
+        Ok(())
     }
 
     fn handle_session_transition(&mut self, cur_status: u8, energy_kwh: f64) {
@@ -505,7 +511,7 @@ impl super::AlfenDriver {
 
             // Derive final status from base status and context
             let derived_status = self.derive_status(m.status, soc_below_min) as u8;
-            self.finalize_cycle(&m, derived_status, effective);
+            self.finalize_cycle(&m, derived_status, effective)?;
         }
 
         self.logger.debug("Poll cycle completed");
