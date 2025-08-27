@@ -461,6 +461,19 @@ impl Config {
         Ok(config)
     }
 
+    /// Load configuration with an optional explicit override path.
+    ///
+    /// When `override_path` is provided, the configuration is loaded strictly
+    /// from that path and any error (including file-not-found) is returned
+    /// without falling back to default search locations. When `override_path`
+    /// is `None`, this behaves like `load()` and searches default locations.
+    pub fn load_with_override<P: AsRef<Path>>(override_path: Option<P>) -> Result<Self> {
+        if let Some(p) = override_path {
+            return Self::from_file(p);
+        }
+        Self::load()
+    }
+
     /// Load configuration with validation
     pub fn load() -> Result<Self> {
         // Try to load from default locations

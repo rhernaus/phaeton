@@ -87,6 +87,9 @@ Run:
 ```bash
 # Ensure working directory contains config or place config at /data or /etc/phaeton
 phaeton
+
+# Or provide an explicit config path (disables fallback search)
+phaeton --config /data/phaeton_config.yaml
 ```
 
 Nightly builds are published to the rolling `nightly` prerelease for early testing.
@@ -125,7 +128,10 @@ cd /data/phaeton
 cat >/data/rc.local <<'EOF'
 #!/bin/sh
 cd /data/phaeton
+# Either rely on default search (./, /data, /etc/phaeton)
 /data/phaeton/phaeton >> /data/phaeton.log 2>&1 &
+# Or pin a specific config file (no fallback)
+# /data/phaeton/phaeton --config /data/phaeton_config.yaml >> /data/phaeton.log 2>&1 &
 exit 0
 EOF
 chmod +x /data/rc.local
