@@ -135,7 +135,7 @@ openapi = ["dep:utoipa", "dep:utoipa-swagger-ui", "dep:schemars"]
 tibber = ["dep:reqwest"]
 
 # Optional compression features for tower-http
-compression = []
+compression = ["tower-http/compression-br", "tower-http/compression-gzip"]
 
 # Convenience to enable everything
 full = ["web", "dbus", "openapi", "tibber", "compression"]
