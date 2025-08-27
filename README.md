@@ -32,7 +32,7 @@ A high-performance EV charger driver for Victron Venus OS, providing seamless in
 
 - **Dynamic Pricing (Tibber)**: Implemented behind `tibber` feature; GraphQL pricing, caching, strategies (experimental)
 - **Vehicle Integration**: Tesla and Kia clients
-- **Self-Updates**: Git-based update check/apply
+- **Self-Updates**: Release-based update check/apply
 - **D‑Bus**: Export full object tree (org.freedesktop.DBus.Properties) for complete Venus OS parity
 - **Security**: Authentication/authorization and rate limiting for the web API
 - **Metrics**: Prometheus exporter
@@ -71,7 +71,7 @@ sha256sum phaeton-<tag>-x86_64-unknown-linux-gnu.tar.gz
 grep phaeton-<tag>-x86_64-unknown-linux-gnu.tar.gz SHA256SUMS
 ```
 
-Install:
+Install (Linux):
 
 ```bash
 tar -xzf phaeton-<tag>-<artifact>.tar.gz
@@ -90,6 +90,46 @@ phaeton
 ```
 
 Nightly builds are published to the rolling `nightly` prerelease for early testing.
+
+Install on Victron Venus OS (Cerbo GX):
+
+Only `/data` is writable. Do not install to `/usr/local` or `/etc`.
+
+1) Copy the artifact to the device (replace placeholders):
+
+```bash
+scp phaeton-<tag>-<artifact>.tar.gz root@<cerbo-ip>:/data/
+```
+
+2) Extract into `/data/phaeton` and prepare config and UI:
+
+```bash
+ssh root@<cerbo-ip>
+mkdir -p /data/phaeton
+tar -xzf /data/phaeton-<tag>-<artifact>.tar.gz -C /data/phaeton --strip-components=1
+cp /data/phaeton/phaeton_config.sample.yaml /data/phaeton_config.yaml
+# Optional but recommended on Venus OS: log to /data
+sed -i 's#/var/log/phaeton.log#/data/phaeton.log#' /data/phaeton_config.yaml || true
+```
+
+3) Test run manually (ensure working dir contains `webui/`):
+
+```bash
+cd /data/phaeton
+./phaeton &
+```
+
+4) Autostart on boot via `/data/rc.local`:
+
+```bash
+cat >/data/rc.local <<'EOF'
+#!/bin/sh
+cd /data/phaeton
+/data/phaeton/phaeton >> /data/phaeton.log 2>&1 &
+exit 0
+EOF
+chmod +x /data/rc.local
+```
 
 ### Prerequisites
 
