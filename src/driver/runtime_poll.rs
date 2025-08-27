@@ -93,23 +93,83 @@ impl super::AlfenDriver {
         0
     }
 
-    fn adjust_connected_status(&self, status_base: i32) -> i32 {
-        let mut status = status_base;
+    /// Derive Victron-esque status from base hardware status and current context.
+    ///
+    /// Rule order (highest precedence first):
+    /// - StartStop=Stopped -> 6 (Wait start)
+    /// - Scheduled mode with inactive window -> 6 (Wait start)
+    /// - Auto or Scheduled with Low SoC -> 7 (Low SOC)
+    /// - Auto with near-zero current -> 4 (Wait sun)
+    /// - Fallback to base (0/1/2)
+    fn derive_status(&self, status_base: i32, soc_below_min: Option<bool>) -> i32 {
         let connected = status_base == 1 || status_base == 2;
-        if connected {
-            if matches!(self.start_stop, crate::controls::StartStopState::Stopped) {
-                status = 6;
-            } else if matches!(self.current_mode, crate::controls::ChargingMode::Auto) {
-                if self.last_sent_current < 0.1 {
-                    status = 4;
-                }
-            } else if matches!(self.current_mode, crate::controls::ChargingMode::Scheduled)
-                && !crate::controls::ChargingControls::is_schedule_active(&self.config)
-            {
-                status = 6;
+        if !connected {
+            return status_base;
+        }
+
+        // Wait start due to explicit stop
+        if matches!(self.start_stop, crate::controls::StartStopState::Stopped) {
+            return 6;
+        }
+
+        // Low SOC for Auto and Scheduled (Manual continues)
+        if (matches!(self.current_mode, crate::controls::ChargingMode::Auto)
+            || matches!(self.current_mode, crate::controls::ChargingMode::Scheduled))
+            && soc_below_min == Some(true)
+        {
+            return 7;
+        }
+
+        // Wait start due to inactive schedule window
+        if matches!(self.current_mode, crate::controls::ChargingMode::Scheduled)
+            && !crate::controls::ChargingControls::is_schedule_active(&self.config)
+        {
+            return 6;
+        }
+
+        // Wait sun when Auto but not currently charging / near-zero available
+        if matches!(self.current_mode, crate::controls::ChargingMode::Auto)
+            && self.last_sent_current < 0.1
+        {
+            return 4;
+        }
+
+        status_base
+    }
+
+    async fn fetch_battery_soc_and_minimum_limit(&self) -> Option<(f64, f64)> {
+        let dbus_guard = self.dbus.as_ref()?.lock().await;
+        // Read battery SoC from com.victronenergy.system
+        async fn get_f64(svc: &crate::dbus::DbusService, service: &str, path: &str) -> Option<f64> {
+            match svc.read_remote_value(service, path).await {
+                Ok(v) => v
+                    .as_f64()
+                    .or_else(|| v.as_i64().map(|x| x as f64))
+                    .or_else(|| v.as_u64().map(|x| x as f64)),
+                Err(_) => None,
             }
         }
-        status
+
+        let soc_opt = get_f64(&dbus_guard, "com.victronenergy.system", "/Dc/Battery/Soc").await;
+        let soc = match soc_opt {
+            Some(s) if s.is_finite() => s,
+            _ => return None,
+        };
+
+        // Find MinimumSocLimit from any com.victronenergy.multi.* device
+        let names = dbus_guard
+            .list_service_names_with_prefix("com.victronenergy.multi")
+            .await
+            .unwrap_or_default();
+        for svc_name in names {
+            if let Some(min) =
+                get_f64(&dbus_guard, &svc_name, "/Settings/Ess/MinimumSocLimit").await
+                && min.is_finite()
+            {
+                return Some((soc, min));
+            }
+        }
+        None
     }
 
     async fn update_station_max_current_from_modbus(&mut self) {
@@ -206,8 +266,7 @@ impl super::AlfenDriver {
         let (powers_triplet, total_power) =
             Self::decode_powers(&power_regs, &voltages_triplet, &currents_triplet);
         let energy_kwh = Self::decode_energy_kwh(&energy_regs);
-        let status_base = Self::compute_status_from_regs(&status_regs);
-        let status = self.adjust_connected_status(status_base);
+        let status = Self::compute_status_from_regs(&status_regs);
 
         RealtimeMeasurements {
             voltages: voltages_triplet,
@@ -329,6 +388,7 @@ impl super::AlfenDriver {
         status_obj.to_string()
     }
 
+    #[allow(clippy::cognitive_complexity)]
     pub(crate) async fn poll_cycle(&mut self) -> Result<()> {
         self.logger.debug("Starting poll cycle");
         if self.modbus_manager.is_some() {
@@ -345,7 +405,7 @@ impl super::AlfenDriver {
                 .calculate_excess_pv_power(ev_power_for_subtract)
                 .await
                 .unwrap_or(0.0);
-            let effective: f32 = self
+            let mut effective: f32 = self
                 .controls
                 .compute_effective_current(
                     self.current_mode,
@@ -358,6 +418,29 @@ impl super::AlfenDriver {
                 )
                 .await
                 .unwrap_or(0.0);
+
+            // Fetch SoC once for both clamping and status derivation
+            let mut soc_below_min: Option<bool> = None;
+            if matches!(self.start_stop, crate::controls::StartStopState::Enabled)
+                && (matches!(self.current_mode, crate::controls::ChargingMode::Auto)
+                    || matches!(self.current_mode, crate::controls::ChargingMode::Scheduled))
+                && let Some((soc, min_limit)) = self.fetch_battery_soc_and_minimum_limit().await
+                && soc.is_finite()
+                && min_limit.is_finite()
+            {
+                soc_below_min = Some(soc < min_limit);
+                if soc < min_limit
+                    && !matches!(self.current_mode, crate::controls::ChargingMode::Manual)
+                {
+                    if effective > 0.0 {
+                        self.logger.info(&format!(
+                            "Stopping charging due to Low SOC: SoC={:.1}% < MinimumSocLimit={:.1}%",
+                            soc, min_limit
+                        ));
+                    }
+                    effective = 0.0;
+                }
+            }
 
             let (should_update, need_change, interval_due) = self.should_send_update(effective);
             if should_update {
@@ -383,7 +466,9 @@ impl super::AlfenDriver {
                 }
             }
 
-            let cur_status = m.status as u8;
+            // Derive final status from base status and context
+            let derived_status = self.derive_status(m.status, soc_below_min) as u8;
+            let cur_status = derived_status;
             self.handle_session_transition(cur_status, m.energy_kwh);
 
             self.sessions.update(m.total_power, m.energy_kwh)?;
@@ -392,7 +477,7 @@ impl super::AlfenDriver {
 
             self.logger.debug(&format!(
                 "V=({:.1},{:.1},{:.1})V I=({:.2},{:.2},{:.2})A P=({:.0},{:.0},{:.0})W total={:.0}W E={:.3}kWh status={} lag_ms={} last_sent_A={:.2}",
-                m.voltages.l1, m.voltages.l2, m.voltages.l3, m.currents.l1, m.currents.l2, m.currents.l3, m.powers.l1, m.powers.l2, m.powers.l3, m.total_power, m.energy_kwh, m.status,
+                m.voltages.l1, m.voltages.l2, m.voltages.l3, m.currents.l1, m.currents.l2, m.currents.l3, m.powers.l1, m.powers.l2, m.powers.l3, m.total_power, m.energy_kwh, cur_status,
                 self.last_set_current_monotonic.elapsed().as_millis(), self.last_sent_current
             ));
 
@@ -511,7 +596,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn adjust_connected_status_variants() {
+    async fn derive_status_variants() {
         let (tx, rx) = mpsc::unbounded_channel();
         let mut d = crate::driver::AlfenDriver::new(rx, tx).await.unwrap();
 
@@ -519,13 +604,22 @@ mod tests {
         d.start_stop = crate::controls::StartStopState::Stopped;
         d.current_mode = crate::controls::ChargingMode::Manual;
         d.last_sent_current = 0.0;
-        assert_eq!(d.adjust_connected_status(1), 6);
+        assert_eq!(d.derive_status(1, None), 6);
 
         // Auto mode with near-zero last current -> 4
         d.start_stop = crate::controls::StartStopState::Enabled;
         d.current_mode = crate::controls::ChargingMode::Auto;
         d.last_sent_current = 0.05;
-        assert_eq!(d.adjust_connected_status(1), 4);
+        assert_eq!(d.derive_status(1, None), 4);
+
+        // Low SOC overrides to 7 for Auto
+        assert_eq!(d.derive_status(1, Some(true)), 7);
+
+        // Scheduled inactive window -> 6
+        d.current_mode = crate::controls::ChargingMode::Scheduled;
+        // Schedule inactive is handled inside derive (using config); we cannot easily force it here
+        // but Low SOC should still override to 7
+        assert_eq!(d.derive_status(1, Some(true)), 7);
     }
 
     #[tokio::test]
