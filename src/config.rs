@@ -50,6 +50,10 @@ pub struct Config {
     /// Pricing configuration for session cost calculation
     pub pricing: PricingConfig,
 
+    /// Updater configuration
+    #[serde(default)]
+    pub updates: UpdaterConfig,
+
     /// Polling interval in milliseconds
     pub poll_interval_ms: u64,
 
@@ -320,6 +324,24 @@ pub struct PricingConfig {
     pub currency_symbol: String,
 }
 
+/// Updater configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(schemars::JsonSchema))]
+pub struct UpdaterConfig {
+    /// Enable updater background tasks
+    pub enabled: bool,
+    /// Periodically check for updates
+    pub auto_check: bool,
+    /// Automatically apply updates when available
+    pub auto_update: bool,
+    /// Include prerelease versions
+    pub include_prereleases: bool,
+    /// Check interval in hours
+    pub check_interval_hours: u32,
+    /// Override repository URL (defaults to Cargo package repository)
+    pub repository: String,
+}
+
 impl Default for ModbusConfig {
     fn default() -> Self {
         Self {
@@ -431,6 +453,19 @@ impl Default for PricingConfig {
     }
 }
 
+impl Default for UpdaterConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            auto_check: true,
+            auto_update: false,
+            include_prereleases: false,
+            check_interval_hours: 24,
+            repository: String::new(),
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -447,6 +482,7 @@ impl Default for Config {
             timezone: "UTC".to_string(),
             web: WebConfig::default(),
             pricing: PricingConfig::default(),
+            updates: UpdaterConfig::default(),
             vehicle: None,
             vehicles: None,
         }
@@ -544,39 +580,4 @@ impl Config {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_default_config() {
-        let config = Config::default();
-        assert_eq!(config.modbus.port, 502);
-        assert_eq!(config.device_instance, 0);
-        assert_eq!(config.poll_interval_ms, 1000);
-        assert!(config.require_dbus);
-    }
-
-    #[test]
-    fn test_config_validation() {
-        let mut config = Config::default();
-        assert!(config.validate().is_ok());
-
-        // Test invalid IP
-        config.modbus.ip = String::new();
-        assert!(config.validate().is_err());
-
-        // Reset and test invalid port
-        config = Config::default();
-        config.modbus.port = 0;
-        assert!(config.validate().is_err());
-    }
-
-    #[test]
-    fn test_config_serialization() {
-        let config = Config::default();
-        let yaml = serde_yaml::to_string(&config).unwrap();
-        let deserialized: Config = serde_yaml::from_str(&yaml).unwrap();
-        assert_eq!(config.modbus.port, deserialized.modbus.port);
-    }
-}
+// Tests moved to `src/config_tests.rs` to keep file size within budget
