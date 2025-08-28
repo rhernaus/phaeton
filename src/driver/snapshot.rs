@@ -106,6 +106,16 @@ impl super::AlfenDriver {
             overrun_count: self.overrun_count,
             poll_interval_ms: self.config.poll_interval_ms,
             excess_pv_power_w: self.last_excess_pv_power_w,
+            modbus_connected: self
+                .modbus_manager
+                .as_ref()
+                .and_then(|m| m.connection_status()),
+            driver_state: match self.get_state() {
+                super::types::DriverState::Initializing => "Initializing".to_string(),
+                super::types::DriverState::Running => "Running".to_string(),
+                super::types::DriverState::Error(_) => "Error".to_string(),
+                super::types::DriverState::ShuttingDown => "ShuttingDown".to_string(),
+            },
         }
     }
 }

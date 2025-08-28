@@ -6,17 +6,74 @@
 use crate::config::LoggingConfig;
 use crate::error::{PhaetonError, Result};
 use once_cell::sync::OnceCell;
+use std::io::{self, Write};
 use std::path::Path;
 use std::sync::Once;
+use tokio::sync::broadcast;
 use tracing::{Level, debug, error, info, trace, warn};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_appender::{non_blocking, rolling};
+use tracing_subscriber::fmt::writer::MakeWriter;
 use tracing_subscriber::{EnvFilter, Layer, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 // Keep the non-blocking worker guard alive for the entire process lifetime
 static LOG_GUARD: OnceCell<WorkerGuard> = OnceCell::new();
 static INIT_ONCE: Once = Once::new();
 static INIT_ERROR: OnceCell<String> = OnceCell::new();
+static LOG_BROADCAST_TX: OnceCell<broadcast::Sender<String>> = OnceCell::new();
+
+#[derive(Clone)]
+struct BroadcastMakeWriter {
+    tx: broadcast::Sender<String>,
+}
+
+struct BroadcastWriter {
+    tx: broadcast::Sender<String>,
+    buffer: Vec<u8>,
+}
+
+impl<'a> MakeWriter<'a> for BroadcastMakeWriter {
+    type Writer = BroadcastWriter;
+    fn make_writer(&'a self) -> Self::Writer {
+        BroadcastWriter {
+            tx: self.tx.clone(),
+            buffer: Vec::with_capacity(256),
+        }
+    }
+}
+
+impl Write for BroadcastWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.buffer.extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Drop for BroadcastWriter {
+    fn drop(&mut self) {
+        if self.buffer.is_empty() {
+            return;
+        }
+        let mut line = String::from_utf8_lossy(&self.buffer).to_string();
+        while line.ends_with('\n') || line.ends_with('\r') {
+            line.pop();
+        }
+        let _ = self.tx.send(line);
+    }
+}
+
+fn get_or_init_log_tx() -> broadcast::Sender<String> {
+    LOG_BROADCAST_TX
+        .get_or_init(|| {
+            let (tx, _rx) = broadcast::channel::<String>(1024);
+            tx
+        })
+        .clone()
+}
 
 /// Initialize logging system based on configuration
 pub fn init_logging(config: &LoggingConfig) -> Result<()> {
@@ -68,9 +125,26 @@ fn init_console_only_logging(filter: EnvFilter, json_format: bool, level: Level)
         }
     };
 
+    let broadcast_layer = {
+        let make = BroadcastMakeWriter {
+            tx: get_or_init_log_tx(),
+        };
+        let layer = fmt::layer()
+            .with_writer(make)
+            .with_target(false)
+            .with_thread_ids(false)
+            .with_file(false);
+        if json_format {
+            layer.json().boxed()
+        } else {
+            layer.boxed()
+        }
+    };
+
     tracing_subscriber::registry()
         .with(filter)
         .with(console_layer)
+        .with(broadcast_layer)
         .init();
 
     info!("Logging initialized - level: {}, console-only", level);
@@ -112,7 +186,23 @@ fn init_file_logging(config: &LoggingConfig, filter: EnvFilter, level: Level) ->
         }
     };
 
-    let subscriber = registry.with(file_layer);
+    let broadcast_layer = {
+        let make = BroadcastMakeWriter {
+            tx: get_or_init_log_tx(),
+        };
+        let layer = fmt::layer()
+            .with_writer(make)
+            .with_target(false)
+            .with_thread_ids(false)
+            .with_file(false);
+        if config.json_format {
+            layer.json().boxed()
+        } else {
+            layer.boxed()
+        }
+    };
+
+    let subscriber = registry.with(file_layer).with(broadcast_layer);
 
     if config.console_output {
         let console_layer = {
@@ -277,6 +367,11 @@ pub fn get_logger_with_context(context: LogContext) -> StructuredLogger {
 pub fn shutdown() {
     // The tracing system will automatically handle shutdown
     // when the application exits
+}
+
+/// Subscribe to a stream of formatted log lines
+pub fn subscribe_log_lines() -> broadcast::Receiver<String> {
+    get_or_init_log_tx().subscribe()
 }
 
 #[cfg(test)]

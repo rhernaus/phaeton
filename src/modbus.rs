@@ -457,6 +457,9 @@ impl ModbusConnectionManager {
 
 #[async_trait::async_trait]
 impl crate::driver::modbus_like::ModbusLike for ModbusConnectionManager {
+    fn connection_status(&self) -> Option<bool> {
+        Some(self.client.is_connected())
+    }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }

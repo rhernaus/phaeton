@@ -69,6 +69,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: rust-cross-compilation-${{ matrix.target }}
+          save-if: ${{ github.ref_type != 'tag' }}
 
       - name: Install cross-compilation tools
         env:

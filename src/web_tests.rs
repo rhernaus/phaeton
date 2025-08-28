@@ -43,6 +43,8 @@ async fn test_state_async() -> AppState {
         overrun_count: 0,
         poll_interval_ms: 1000,
         excess_pv_power_w: 0.0,
+        modbus_connected: Some(false),
+        driver_state: "Initializing".to_string(),
     }));
     let _ = snapshot_tx;
     AppState { driver: Arc::new(Mutex::new(driver)), snapshot_rx }
@@ -80,6 +82,7 @@ async fn metrics_returns_json() {
     let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(json.get("total_polls").is_some());
+    assert!(json.get("driver_state").is_some());
 }
 
 #[tokio::test]

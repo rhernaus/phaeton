@@ -37,4 +37,15 @@ window.addButtonFeedback = function (button) {
   });
 };
 
+// Small helper to format ms to human-friendly age
+window.formatAge = function (ms) {
+  if (typeof ms !== 'number' || ms < 0) return '-';
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${s % 60}s`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m`;
+};
+
 

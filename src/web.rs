@@ -17,6 +17,7 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, watch};
 // no timeouts needed in current web handlers
 use tokio_stream::StreamExt;
+use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::WatchStream;
 use tower_http::services::ServeDir;
 use tower_http::set_header::SetResponseHeaderLayer;
@@ -84,6 +85,8 @@ async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
         "total_polls": snap.total_polls,
         "overrun_count": snap.overrun_count,
         "poll_interval_ms": snap.poll_interval_ms,
+        "modbus_connected": snap.modbus_connected,
+        "driver_state": snap.driver_state,
     });
     Json(body)
 }
@@ -135,7 +138,6 @@ async fn get_config(State(state): State<AppState>) -> impl IntoResponse {
     let mut json = serde_json::to_value(drv.config().clone())
         .unwrap_or(serde_json::json!({"error":"serialization"}));
     if let Some(obj) = json.as_object_mut() {
-        obj.remove("vehicle");
         obj.remove("vehicles");
     }
     Json(json)
@@ -259,6 +261,18 @@ async fn logs_head(
     }
 }
 
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/logs/stream", responses((status = 200))))]
+async fn logs_stream() -> impl IntoResponse {
+    let rx = crate::logging::subscribe_log_lines();
+    let stream = BroadcastStream::new(rx).filter_map(|res| match res {
+        Ok(line) => Some(Ok::<Event, std::convert::Infallible>(
+            Event::default().event("log").data(line),
+        )),
+        Err(_) => None,
+    });
+    Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/logs/download", responses((status = 200))))]
 async fn logs_download(State(state): State<AppState>) -> impl IntoResponse {
     let path = {
@@ -291,23 +305,41 @@ async fn dbus_dump(State(state): State<AppState>) -> impl IntoResponse {
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/update/status", responses((status = 200))))]
-async fn update_status() -> impl IntoResponse {
-    let updater = crate::updater::GitUpdater::new(
-        env!("CARGO_PKG_REPOSITORY").to_string(),
-        "main".to_string(),
-    );
+async fn update_status(State(state): State<AppState>) -> impl IntoResponse {
+    let (repo, include_prereleases) = {
+        let drv = state.driver.lock().await;
+        let cfg = drv.config();
+        let repo = if cfg.updates.repository.trim().is_empty() {
+            env!("CARGO_PKG_REPOSITORY").to_string()
+        } else {
+            cfg.updates.repository.clone()
+        };
+        (repo, cfg.updates.include_prereleases)
+    };
+    let _ = include_prereleases; // status does not use prereleases flag
+    let updater = crate::updater::GitUpdater::new(repo, "main".to_string());
     Json(
         serde_json::to_value(updater.get_status()).unwrap_or(serde_json::json!({"error":"status"})),
     )
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/update/check", responses((status = 200))))]
-async fn update_check() -> impl IntoResponse {
-    let mut updater = crate::updater::GitUpdater::new(
-        env!("CARGO_PKG_REPOSITORY").to_string(),
-        "main".to_string(),
-    );
-    match updater.check_for_updates().await {
+async fn update_check(State(state): State<AppState>) -> impl IntoResponse {
+    let (repo, include_prereleases) = {
+        let drv = state.driver.lock().await;
+        let cfg = drv.config();
+        let repo = if cfg.updates.repository.trim().is_empty() {
+            env!("CARGO_PKG_REPOSITORY").to_string()
+        } else {
+            cfg.updates.repository.clone()
+        };
+        (repo, cfg.updates.include_prereleases)
+    };
+    let mut updater = crate::updater::GitUpdater::new(repo, "main".to_string());
+    match updater
+        .check_for_updates_with_prereleases(include_prereleases)
+        .await
+    {
         Ok(st) => (StatusCode::OK, Json(serde_json::to_value(st).unwrap())),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -323,16 +355,30 @@ struct ApplyBody {
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/update/apply", responses((status = 200))))]
-async fn update_apply(Json(body): Json<ApplyBody>) -> impl IntoResponse {
-    let mut updater = crate::updater::GitUpdater::new(
-        env!("CARGO_PKG_REPOSITORY").to_string(),
-        "main".to_string(),
-    );
+async fn update_apply(
+    State(state): State<AppState>,
+    Json(body): Json<ApplyBody>,
+) -> impl IntoResponse {
+    let (repo, include_prereleases) = {
+        let drv = state.driver.lock().await;
+        let cfg = drv.config();
+        let repo = if cfg.updates.repository.trim().is_empty() {
+            env!("CARGO_PKG_REPOSITORY").to_string()
+        } else {
+            cfg.updates.repository.clone()
+        };
+        (repo, cfg.updates.include_prereleases)
+    };
+    let mut updater = crate::updater::GitUpdater::new(repo, "main".to_string());
     let tag = body.version;
     let res = if tag.is_some() {
-        updater.apply_release(tag).await
+        updater
+            .apply_release_with_prereleases(tag, include_prereleases)
+            .await
     } else {
-        updater.apply_updates().await
+        updater
+            .apply_updates_with_prereleases(include_prereleases)
+            .await
     };
     match res {
         Ok(_) => (
@@ -347,12 +393,19 @@ async fn update_apply(Json(body): Json<ApplyBody>) -> impl IntoResponse {
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/update/releases", responses((status = 200))))]
-async fn update_releases() -> impl IntoResponse {
-    let updater = crate::updater::GitUpdater::new(
-        env!("CARGO_PKG_REPOSITORY").to_string(),
-        "main".to_string(),
-    );
-    match updater.list_releases(false).await {
+async fn update_releases(State(state): State<AppState>) -> impl IntoResponse {
+    let (repo, include_prereleases) = {
+        let drv = state.driver.lock().await;
+        let cfg = drv.config();
+        let repo = if cfg.updates.repository.trim().is_empty() {
+            env!("CARGO_PKG_REPOSITORY").to_string()
+        } else {
+            cfg.updates.repository.clone()
+        };
+        (repo, cfg.updates.include_prereleases)
+    };
+    let updater = crate::updater::GitUpdater::new(repo, "main".to_string());
+    match updater.list_releases(include_prereleases).await {
         Ok(list) => (StatusCode::OK, Json(serde_json::to_value(list).unwrap())),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -378,6 +431,7 @@ async fn events(State(state): State<AppState>) -> impl IntoResponse {
         health, status, set_mode, set_startstop, set_current,
         get_config, put_config, get_config_schema,
         logs_tail, logs_head, logs_download,
+        logs_stream,
         sessions, dbus_dump, update_status, update_check, update_apply, update_releases,
         events, metrics,
     ),
@@ -439,6 +493,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/logs/tail", get(logs_tail))
         .route("/api/logs/head", get(logs_head))
         .route("/api/logs/download", get(logs_download))
+        .route("/api/logs/stream", get(logs_stream))
         .route("/api/sessions", get(sessions))
         .route("/api/dbus", get(dbus_dump))
         .route("/api/update/status", get(update_status))

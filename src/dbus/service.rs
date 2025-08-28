@@ -450,6 +450,8 @@ mod tests {
             overrun_count: 0,
             poll_interval_ms: 1000,
             excess_pv_power_w: 0.0,
+            modbus_connected: Some(true),
+            driver_state: "Running".to_string(),
         };
 
         svc.export_typed_snapshot(&snap).await.unwrap();

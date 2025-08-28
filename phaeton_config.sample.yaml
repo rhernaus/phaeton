@@ -85,6 +85,15 @@ pricing:
   static_rate_eur_per_kwh: 0.25
   currency_symbol: "€"
 
+updates:
+  enabled: true
+  auto_check: true
+  auto_update: false
+  include_prereleases: false
+  check_interval_hours: 24
+  # repository can override Cargo package repository; leave empty to use default
+  repository: ""
+
 poll_interval_ms: 1000
 timezone: "UTC"
 

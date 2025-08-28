@@ -60,12 +60,7 @@ pub struct Config {
     /// Timezone for schedule operations
     pub timezone: String,
 
-    /// Vehicle integrations (optional) - keep out of schema & serialized output
-    #[serde(skip_serializing)]
-    #[cfg_attr(feature = "openapi", schemars(skip))]
-    pub vehicle: Option<HashMap<String, serde_yaml::Value>>,
-
-    /// Multiple vehicle configurations - keep out of schema & serialized output
+    /// Multiple vehicle configurations - kept out of schema & serialized output
     #[serde(skip_serializing)]
     #[cfg_attr(feature = "openapi", schemars(skip))]
     pub vehicles: Option<HashMap<String, serde_yaml::Value>>,
@@ -483,7 +478,6 @@ impl Default for Config {
             web: WebConfig::default(),
             pricing: PricingConfig::default(),
             updates: UpdaterConfig::default(),
-            vehicle: None,
             vehicles: None,
         }
     }

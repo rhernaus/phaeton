@@ -30,22 +30,33 @@ window.setConnectionState = function (ok) {
 window.showError = function (msg) { const el = document.getElementById('error_banner'); if (!el) return; if (msg) { el.textContent = msg; el.style.display = ''; } else { el.textContent = ''; el.style.display = 'none'; } };
 
 window.switchView = function (viewName) {
-  const dashboardContent = $('dashboard_content'); const configContent = $('config_content'); const updatesContent = $('updates_content'); const logsContent = $('logs_content'); const dashboardBtn = $('dashboard_view'); const configBtn = $('config_view'); const updatesBtn = $('updates_view'); const logsBtn = $('logs_view');
-  if (!dashboardContent || !configContent || !dashboardBtn || !configBtn || !updatesContent || !updatesBtn || !logsContent || !logsBtn) return;
-  function setButtons(d,c,u,l) { dashboardBtn.classList.toggle('active', d); configBtn.classList.toggle('active', c); updatesBtn.classList.toggle('active', u); logsBtn.classList.toggle('active', l); dashboardBtn.setAttribute('aria-pressed', String(d)); configBtn.setAttribute('aria-pressed', String(c)); updatesBtn.setAttribute('aria-pressed', String(u)); logsBtn.setAttribute('aria-pressed', String(l)); }
+  const dashboardContent = $('dashboard_content');
+  const configContent = $('config_content');
+  const updatesContent = $('updates_content');
+  const logsContent = $('logs_content');
+  const statusContent = $('status_content');
+  const dashboardBtn = $('dashboard_view');
+  const configBtn = $('config_view');
+  const updatesBtn = $('updates_view');
+  const statusBtn = $('status_view');
+  const logsBtn = $('logs_view');
+  if (!dashboardContent || !configContent || !dashboardBtn || !configBtn || !updatesContent || !updatesBtn || !logsContent || !logsBtn || !statusContent || !statusBtn) return;
+  function setButtons(d,c,u,s,l) { dashboardBtn.classList.toggle('active', d); configBtn.classList.toggle('active', c); updatesBtn.classList.toggle('active', u); statusBtn.classList.toggle('active', s); logsBtn.classList.toggle('active', l); dashboardBtn.setAttribute('aria-pressed', String(d)); configBtn.setAttribute('aria-pressed', String(c)); updatesBtn.setAttribute('aria-pressed', String(u)); statusBtn.setAttribute('aria-pressed', String(s)); logsBtn.setAttribute('aria-pressed', String(l)); }
   function show(el) { el.style.display = 'block'; el.style.opacity = '1'; }
   function hide(el) { el.style.opacity = '0'; setTimeout(() => { el.style.display = 'none'; }, 150); }
-  if (viewName === 'dashboard') { hide(configContent); hide(updatesContent); hide(logsContent); show(dashboardContent); setButtons(true,false,false,false); isConfigOpen = false; }
-  else if (viewName === 'config') { hide(dashboardContent); hide(updatesContent); hide(logsContent); show(configContent); setButtons(false,true,false,false); isConfigOpen = true; if (currentSchema && currentConfig) { buildForm(currentSchema, currentConfig); } else { initConfigForm(); } }
-  else if (viewName === 'updates') { hide(dashboardContent); hide(configContent); hide(logsContent); show(updatesContent); setButtons(false,false,true,false); (async () => { try { await fetch('/api/update/check', { method: 'POST' }); } catch (e) {} try { const res = await fetch('/api/update/status'); const s = await res.json(); const statEl = $('updates_status'); if (statEl && s) { const parts = []; if (s.current_version) parts.push(`current: ${s.current_version}`); if (s.latest_version) parts.push(`latest: ${s.latest_version}`); if (typeof s.update_available === 'boolean') parts.push(s.update_available ? 'update available' : 'up to date'); statEl.textContent = parts.join(' | '); } } catch (e) {} try { if (typeof window.loadReleases === 'function') window.loadReleases(); } catch (e) {} })(); }
-  else if (viewName === 'logs') { hide(dashboardContent); hide(configContent); hide(updatesContent); show(logsContent); setButtons(false,false,false,true); ensureLogsStream(); }
+  if (viewName === 'dashboard') { hide(configContent); hide(updatesContent); hide(logsContent); hide(statusContent); show(dashboardContent); setButtons(true,false,false,false,false); isConfigOpen = false; }
+  else if (viewName === 'config') { hide(dashboardContent); hide(updatesContent); hide(logsContent); hide(statusContent); show(configContent); setButtons(false,true,false,false,false); isConfigOpen = true; if (currentSchema && currentConfig) { buildForm(currentSchema, currentConfig); } else { initConfigForm(); } }
+  else if (viewName === 'updates') { hide(dashboardContent); hide(configContent); hide(logsContent); hide(statusContent); show(updatesContent); setButtons(false,false,true,false,false); (async () => { try { await fetch('/api/update/check', { method: 'POST' }); } catch (e) {} try { const res = await fetch('/api/update/status'); const s = await res.json(); const statEl = $('updates_status'); if (statEl && s) { const parts = []; if (s.current_version) parts.push(`current: ${s.current_version}`); if (s.latest_version) parts.push(`latest: ${s.latest_version}`); if (typeof s.update_available === 'boolean') parts.push(s.update_available ? 'update available' : 'up to date'); statEl.textContent = parts.join(' | '); } } catch (e) {} try { if (typeof window.loadReleases === 'function') window.loadReleases(); } catch (e) {} })(); }
+  else if (viewName === 'status') { hide(dashboardContent); hide(configContent); hide(updatesContent); hide(logsContent); show(statusContent); setButtons(false,false,false,true,false); if (typeof window.refreshHealth === 'function') window.refreshHealth(); }
+  else if (viewName === 'logs') { hide(dashboardContent); hide(configContent); hide(updatesContent); hide(statusContent); show(logsContent); setButtons(false,false,false,false,true); ensureLogsStream(); }
 };
 
 window.initUX = function () {
-  const dashboardBtn = $('dashboard_view'); const configBtn = $('config_view'); const updatesBtn = $('updates_view'); const logsBtn = $('logs_view'); const menuToggle = $('menu_toggle'); const menuDropdown = $('menu_dropdown');
+  const dashboardBtn = $('dashboard_view'); const configBtn = $('config_view'); const updatesBtn = $('updates_view'); const statusBtn = $('status_view'); const logsBtn = $('logs_view'); const menuToggle = $('menu_toggle'); const menuDropdown = $('menu_dropdown');
   if (dashboardBtn) { dashboardBtn.addEventListener('click', () => { switchView('dashboard'); if (menuDropdown) { menuDropdown.style.display = 'none'; if (menuToggle) menuToggle.setAttribute('aria-expanded','false'); } }); addButtonFeedback(dashboardBtn); }
   if (configBtn) { configBtn.addEventListener('click', () => { switchView('config'); if (menuDropdown) { menuDropdown.style.display = 'none'; if (menuToggle) menuToggle.setAttribute('aria-expanded','false'); } }); addButtonFeedback(configBtn); }
   if (updatesBtn) { updatesBtn.addEventListener('click', () => { switchView('updates'); if (menuDropdown) { menuDropdown.style.display = 'none'; if (menuToggle) menuToggle.setAttribute('aria-expanded','false'); } }); addButtonFeedback(updatesBtn); }
+  if (statusBtn) { statusBtn.addEventListener('click', () => { switchView('status'); if (menuDropdown) { menuDropdown.style.display = 'none'; if (menuToggle) menuToggle.setAttribute('aria-expanded','false'); } }); addButtonFeedback(statusBtn); }
   if (logsBtn) { logsBtn.addEventListener('click', () => { switchView('logs'); if (menuDropdown) { menuDropdown.style.display = 'none'; if (menuToggle) menuToggle.setAttribute('aria-expanded','false'); } }); addButtonFeedback(logsBtn); }
   if (menuToggle && menuDropdown) {
     menuToggle.addEventListener('click', () => { const isOpen = menuDropdown.style.display !== 'none'; menuDropdown.style.display = isOpen ? 'none' : ''; menuToggle.setAttribute('aria-expanded', String(!isOpen)); });
