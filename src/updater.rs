@@ -56,16 +56,26 @@ impl GitUpdater {
         }
     }
 
-    /// Check for available updates
+    /// Check for available updates (stable only)
     pub async fn check_for_updates(&mut self) -> Result<UpdateStatus> {
+        self.check_for_updates_with_prereleases(false).await
+    }
+
+    /// Check for available updates with optional prereleases
+    pub async fn check_for_updates_with_prereleases(
+        &mut self,
+        include_prerelease: bool,
+    ) -> Result<UpdateStatus> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
         let current_version = Self::current_version_string();
-        match self.list_releases(false).await {
+        match self.list_releases(include_prerelease).await {
             Ok(list) => {
-                let latest = list.into_iter().find(|r| !r.draft && !r.prerelease);
+                let latest = list
+                    .into_iter()
+                    .find(|r| !r.draft && (!r.prerelease || include_prerelease));
                 let latest_version = latest.as_ref().map(|r| r.tag.clone());
                 let update_available = latest_version
                     .as_ref()
@@ -91,7 +101,13 @@ impl GitUpdater {
 
     /// Apply available updates (latest stable)
     pub async fn apply_updates(&mut self) -> Result<()> {
-        self.apply_release(None).await
+        self.apply_updates_with_prereleases(false).await
+    }
+
+    /// Apply available updates with optional prereleases
+    pub async fn apply_updates_with_prereleases(&mut self, include_prerelease: bool) -> Result<()> {
+        self.apply_release_with_prereleases(None, include_prerelease)
+            .await
     }
 
     /// List GitHub releases (most recent first)
@@ -158,15 +174,24 @@ impl GitUpdater {
 
     /// Apply a given release tag, or the latest stable if None
     pub async fn apply_release(&mut self, tag: Option<String>) -> Result<()> {
+        self.apply_release_with_prereleases(tag, false).await
+    }
+
+    /// Apply a given release tag, or the latest (optionally including prereleases) if None
+    pub async fn apply_release_with_prereleases(
+        &mut self,
+        tag: Option<String>,
+        include_prerelease: bool,
+    ) -> Result<()> {
         let (owner, repo) = Self::parse_repo(&self.repo_url)
             .ok_or_else(|| PhaetonError::update("Invalid repository URL"))?;
         let target_tag = if let Some(t) = tag {
             t
         } else {
-            let releases = self.list_releases(false).await?;
+            let releases = self.list_releases(include_prerelease).await?;
             releases
                 .into_iter()
-                .find(|r| !r.draft && !r.prerelease)
+                .find(|r| !r.draft && (!r.prerelease || include_prerelease))
                 .map(|r| r.tag)
                 .ok_or_else(|| PhaetonError::update("No suitable releases found"))?
         };

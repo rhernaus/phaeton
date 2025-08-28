@@ -47,6 +47,10 @@ pub struct DriverSnapshot {
     pub overrun_count: u64,
     pub poll_interval_ms: u64,
     pub excess_pv_power_w: f32,
+    /// Whether Modbus appears connected (if known)
+    pub modbus_connected: Option<bool>,
+    /// Driver state (Initializing, Running, Error, ShuttingDown)
+    pub driver_state: String,
 }
 
 /// Commands accepted by the driver from external components (web, etc.)

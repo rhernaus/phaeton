@@ -1,13 +1,13 @@
 [package]
 name = "phaeton"
-version = "0.9.0"
+version = "0.10.0"
 edition = "2024"
 description = "Phaeton - EV Charger Driver for Victron Venus OS"
 authors = ["Your Name <your.email@example.com>"]
 license = "MIT OR Apache-2.0"
 keywords = ["ev", "charger", "modbus", "victron", "venus"]
 categories = ["embedded", "api-bindings"]
-repository = "https://github.com/your-org/phaeton"
+repository = "https://github.com/rhernaus/phaeton"
 readme = "README.md"
 
 [dependencies]

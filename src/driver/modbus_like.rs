@@ -4,6 +4,10 @@ use std::any::Any;
 #[async_trait::async_trait]
 pub trait ModbusLike: Send {
     fn as_any_mut(&mut self) -> &mut dyn Any;
+    /// Optional connection status. Default: unknown (None).
+    fn connection_status(&self) -> Option<bool> {
+        None
+    }
     async fn read_holding_registers(
         &mut self,
         slave_id: u8,

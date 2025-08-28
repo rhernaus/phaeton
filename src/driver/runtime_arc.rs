@@ -4,6 +4,71 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::time::{Duration, Instant, interval};
 
+#[cfg(feature = "updater")]
+fn spawn_updater_task(driver: Arc<Mutex<AlfenDriver>>) {
+    tokio::spawn(async move {
+        let logger = crate::logging::get_logger("updater");
+        loop {
+            // Read current config snapshot without holding the lock across I/O
+            let (enabled, auto_check, auto_update, include_prereleases, interval_secs, repo) = {
+                let d = driver.lock().await;
+                let cfg = d.config();
+                let hours = cfg.updates.check_interval_hours.max(1) as u64;
+                let repo = if cfg.updates.repository.trim().is_empty() {
+                    env!("CARGO_PKG_REPOSITORY").to_string()
+                } else {
+                    cfg.updates.repository.clone()
+                };
+                (
+                    cfg.updates.enabled,
+                    cfg.updates.auto_check,
+                    cfg.updates.auto_update,
+                    cfg.updates.include_prereleases,
+                    hours * 3600,
+                    repo,
+                )
+            };
+
+            if enabled && auto_check {
+                let mut updater = crate::updater::GitUpdater::new(repo.clone(), "main".to_string());
+                match updater
+                    .check_for_updates_with_prereleases(include_prereleases)
+                    .await
+                {
+                    Ok(st) => {
+                        let mut msg = format!(
+                            "Auto update check: current={}, latest={:?}, available={}",
+                            st.current_version, st.latest_version, st.update_available
+                        );
+                        if auto_update && st.update_available {
+                            msg.push_str("; applying update");
+                            logger.info(&msg);
+                            let mut upd2 =
+                                crate::updater::GitUpdater::new(repo.clone(), "main".to_string());
+                            if let Err(e) = upd2
+                                .apply_updates_with_prereleases(include_prereleases)
+                                .await
+                            {
+                                logger.error(&format!("Auto update apply failed: {}", e));
+                            }
+                        } else {
+                            logger.info(&msg);
+                        }
+                    }
+                    Err(e) => {
+                        logger.warn(&format!("Auto update check failed: {}", e));
+                    }
+                }
+            }
+
+            tokio::time::sleep(Duration::from_secs(interval_secs)).await;
+        }
+    });
+}
+
+#[cfg(not(feature = "updater"))]
+fn spawn_updater_task(_driver: Arc<Mutex<AlfenDriver>>) {}
+
 async fn init_modbus_and_state(driver: &Arc<Mutex<AlfenDriver>>) -> Result<()> {
     let mut d = driver.lock().await;
     d.logger.info("Starting EV charger driver main loop");
@@ -76,6 +141,9 @@ pub(crate) async fn run_on_arc_impl(driver: Arc<Mutex<AlfenDriver>>) -> Result<(
     // Initialization phase
     init_modbus_and_state(&driver).await?;
     init_dbus_if_configured(&driver).await?;
+
+    // Spawn background updater task (respects config flags)
+    spawn_updater_task(driver.clone());
 
     let poll_interval_ms = get_poll_interval_ms(&driver).await;
     let mut ticker = interval(Duration::from_millis(poll_interval_ms));

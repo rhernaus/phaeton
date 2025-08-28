@@ -55,6 +55,10 @@
                         <span class="view-icon">🆙</span>
                         <span>Updates</span>
                     </button>
+                    <button id="status_view" class="view-btn" aria-pressed="false">
+                        <span class="view-icon">🩺</span>
+                        <span>Status</span>
+                    </button>
                     <button id="logs_view" class="view-btn" aria-pressed="false">
                         <span class="view-icon">📜</span>
                         <span>Logs</span>
@@ -278,6 +282,43 @@
                 </div>
             </div>
 
+            <!-- Status View -->
+            <div id="status_content" class="view-content" style="display: none">
+                <div class="card">
+                    <h2>System Status</h2>
+                    <div class="status-grid">
+                        <div class="info-card">
+                            <span class="info-label">Web/API</span>
+                            <span class="info-value" id="st_web">-</span>
+                        </div>
+                        <div class="info-card">
+                            <span class="info-label">Driver state</span>
+                            <span class="info-value" id="st_driver">-</span>
+                        </div>
+                        <div class="info-card">
+                            <span class="info-label">Modbus</span>
+                            <span class="info-value" id="st_modbus">-</span>
+                        </div>
+                        <div class="info-card">
+                            <span class="info-label">Last poll age</span>
+                            <span class="info-value" id="st_age">-</span>
+                        </div>
+                        <div class="info-card">
+                            <span class="info-label">Total polls</span>
+                            <span class="info-value" id="st_total_polls">-</span>
+                        </div>
+                        <div class="info-card">
+                            <span class="info-label">Overruns</span>
+                            <span class="info-value" id="st_overruns">-</span>
+                        </div>
+                        <div class="info-card">
+                            <span class="info-label">Poll interval</span>
+                            <span class="info-value" id="st_interval">-</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div class="footer">
                 <span>Device instance: <span id="di"></span></span>
                 <div class="device-info">
@@ -293,6 +334,7 @@
             <script src="/ui/js/ux.js"></script>
             <script src="/ui/js/status.js"></script>
             <script src="/ui/js/controls.js"></script>
+            <script src="/ui/js/health.js"></script>
             <script src="/ui/app.js"></script>
         </div>
     </body>

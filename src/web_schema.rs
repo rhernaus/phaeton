@@ -27,6 +27,7 @@ pub fn build_ui_schema() -> Value {
                 "max_retries": {"type": "integer", "min": 1, "title": "Max retries"},
                 "watchdog_interval_seconds": {"type": "integer", "min": 1, "title": "Watchdog interval (s)"},
                 "max_set_current": {"type": "number", "min": 0.01, "step": 0.1, "title": "Max set current (A)"},
+                "min_set_current": {"type": "number", "min": 0.0, "step": 0.1, "title": "Min set current (A)"},
                 "min_charge_duration_seconds": {"type": "integer", "min": 0, "title": "Min charge duration (s)"},
                 "current_update_interval": {"type": "integer", "min": 0, "title": "Current update interval (ms)"},
                 "verify_delay": {"type": "integer", "min": 0, "title": "Verify delay (ms)"},
@@ -50,24 +51,6 @@ pub fn build_ui_schema() -> Value {
                 "strategy": {"type": "enum", "values": ["level","threshold","percentile"], "title": "Strategy"},
                 "max_price_total": {"type": "number", "min": 0.0, "step": 0.001, "title": "Max price (threshold)"},
                 "cheap_percentile": {"type": "number", "min": 0.0, "max": 1.0, "step": 0.01, "title": "Cheap percentile"}
-            }},
-            "vehicle": {"title": "Vehicle (optional)", "type": "object", "fields": {
-                "provider": {"type": "enum", "values": ["none","tesla","kia"], "title": "Provider"},
-                "poll_interval_seconds": {"type": "integer", "min": 10, "max": 86400, "title": "Polling interval (s)"},
-                "tesla": {"type": "object", "fields": {
-                    "access_token": {"type": "string", "title": "Access token"},
-                    "vehicle_id": {"type": "integer", "title": "Vehicle ID (optional)"},
-                    "vin": {"type": "string", "title": "VIN (optional)"},
-                    "wake_if_asleep": {"type": "boolean", "title": "Wake if asleep"}
-                }},
-                "kia": {"type": "object", "fields": {
-                    "username": {"type": "string", "title": "Username"},
-                    "password": {"type": "string", "title": "Password"},
-                    "pin": {"type": "string", "title": "PIN"},
-                    "region": {"type": "string", "title": "Region (EU/USA/CA/CN/AU)"},
-                    "brand": {"type": "string", "title": "Brand (KIA/HYUNDAI)"},
-                    "vin": {"type": "string", "title": "VIN (optional)"}
-                }}
             }},
             "vehicles": {"title": "Vehicles", "type": "list", "item": {"type": "object", "fields": {
                 "name": {"type": "string", "title": "Name (optional)"},
@@ -111,6 +94,7 @@ pub fn build_ui_schema() -> Value {
                 "repository": {"type": "string", "title": "Repository URL (optional)"}
             }},
             "device_instance": {"title": "Device instance", "type": "integer", "min": 0, "max": 255},
+            "require_dbus": {"title": "Require D-Bus on startup", "type": "boolean"},
             "poll_interval_ms": {"title": "Poll interval (ms)", "type": "integer", "min": 100, "max": 60000},
             "timezone": {"title": "Timezone", "type": "string"}
         }
