@@ -128,7 +128,8 @@ async fn update_apply_fails_with_500() {
             Request::builder()
                 .method("POST")
                 .uri("/api/update/apply")
-                .body(axum::body::Body::empty())
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from("{}"))
                 .unwrap(),
         )
         .await
