@@ -5,6 +5,10 @@
 
 use crate::error::{PhaetonError, Result};
 use crate::logging::get_logger;
+#[cfg(feature = "updater")]
+use ammonia::Builder as AmmoniaBuilder;
+#[cfg(feature = "updater")]
+use pulldown_cmark::{Options, Parser, html};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -17,6 +21,8 @@ pub struct ReleaseInfo {
     pub prerelease: bool,
     pub published_at: Option<String>,
     pub body: Option<String>,
+    /// Sanitized HTML rendered from `body` (Markdown)
+    pub body_html: Option<String>,
 }
 
 /// Update status information
@@ -133,6 +139,7 @@ impl GitUpdater {
                     .get("body")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
+                let body_html = body.as_ref().and_then(|md| Self::render_markdown_safe(md));
                 if !tag.is_empty() {
                     out.push(ReleaseInfo {
                         tag,
@@ -141,6 +148,7 @@ impl GitUpdater {
                         prerelease,
                         published_at,
                         body,
+                        body_html,
                     });
                 }
             }
@@ -234,6 +242,28 @@ impl GitUpdater {
             }
         }
         false
+    }
+
+    #[cfg(feature = "updater")]
+    fn render_markdown_safe(md: &str) -> Option<String> {
+        let mut options = Options::empty();
+        options.insert(Options::ENABLE_TABLES);
+        options.insert(Options::ENABLE_STRIKETHROUGH);
+        options.insert(Options::ENABLE_TASKLISTS);
+        options.insert(Options::ENABLE_FOOTNOTES);
+        let parser = Parser::new_ext(md, options);
+        let mut html_buf = String::new();
+        html::push_html(&mut html_buf, parser);
+        let clean = AmmoniaBuilder::default()
+            .add_generic_attributes(&["class", "id", "aria-hidden"]) // minimal
+            .clean(&html_buf)
+            .to_string();
+        Some(clean)
+    }
+
+    #[cfg(not(feature = "updater"))]
+    fn render_markdown_safe(_md: &str) -> Option<String> {
+        None
     }
 
     fn parse_repo(repo_url: &str) -> Option<(String, String)> {

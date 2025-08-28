@@ -78,25 +78,26 @@ window.initUX = function () {
         const label = rel.name ? `${rel.tag} - ${rel.name}` : String(rel.tag);
         opt.textContent = label;
         opt.dataset.body = rel.body ? String(rel.body) : '';
+        opt.dataset.bodyHtml = rel.body_html ? String(rel.body_html) : '';
         releaseSelect.appendChild(opt);
       });
       // Show notes for selected release if present
       const sel = releaseSelect.selectedOptions && releaseSelect.selectedOptions[0];
-      const body = sel && sel.dataset.body ? sel.dataset.body : '';
+      const bodyHtml = sel && sel.dataset.bodyHtml ? sel.dataset.bodyHtml : '';
       const box = $('release_notes');
-      const pre = $('release_notes_pre');
-      if (box && pre) {
-        if (body) { pre.textContent = body; box.style.display = ''; }
-        else { pre.textContent = ''; box.style.display = 'none'; }
+      const htmlBox = $('release_notes_html');
+      if (box && htmlBox) {
+        if (bodyHtml) { htmlBox.innerHTML = bodyHtml; box.style.display = ''; }
+        else { htmlBox.innerHTML = ''; box.style.display = 'none'; }
       }
       releaseSelect.addEventListener('change', () => {
         const s = releaseSelect.selectedOptions && releaseSelect.selectedOptions[0];
-        const b = s && s.dataset.body ? s.dataset.body : '';
+        const bHtml = s && s.dataset.bodyHtml ? s.dataset.bodyHtml : '';
         const bx = $('release_notes');
-        const pr = $('release_notes_pre');
-        if (bx && pr) {
-          if (b) { pr.textContent = b; bx.style.display = ''; }
-          else { pr.textContent = ''; bx.style.display = 'none'; }
+        const htmlEl = $('release_notes_html');
+        if (bx && htmlEl) {
+          if (bHtml) { htmlEl.innerHTML = bHtml; bx.style.display = ''; }
+          else { htmlEl.innerHTML = ''; bx.style.display = 'none'; }
         }
       });
     } catch (e) {

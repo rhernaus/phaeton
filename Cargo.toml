@@ -42,6 +42,8 @@ zbus = { version = "5.10", default-features = false, features = ["tokio"] }
 
 # HTTP client for external APIs (Rustls only)
 reqwest = { version = "0.12", optional = true, default-features = false, features = ["json", "rustls-tls"] }
+pulldown-cmark = { version = "0.12", optional = true }
+ammonia = { version = "4.0", optional = true }
 
 # Date and time handling
 chrono = { version = "0.4", features = ["serde"] }
@@ -134,8 +136,8 @@ openapi = ["dep:utoipa", "dep:utoipa-swagger-ui", "dep:schemars"]
 # Enable Tibber integration HTTP client
 tibber = ["dep:reqwest"]
 
-# Enable self-updater HTTP client
-updater = ["dep:reqwest"]
+# Enable self-updater HTTP client and release notes rendering
+updater = ["dep:reqwest", "dep:pulldown-cmark", "dep:ammonia"]
 
 # Optional compression features for tower-http
 compression = ["tower-http/compression-br", "tower-http/compression-gzip"]
