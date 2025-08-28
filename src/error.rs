@@ -180,7 +180,7 @@ impl From<serde_json::Error> for PhaetonError {
 //     }
 // }
 
-#[cfg(feature = "tibber")]
+#[cfg(any(feature = "tibber", feature = "updater"))]
 impl From<reqwest::Error> for PhaetonError {
     fn from(err: reqwest::Error) -> Self {
         PhaetonError::network(err.to_string())

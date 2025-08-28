@@ -20,7 +20,7 @@ tokio-modbus = { version = "0.16.1", features = ["tcp"] }
 
 # Web framework
 axum = { version = "0.8", features = ["json", "tokio"] }
-tower-http = { version = "0.6", default-features = false, features = ["cors", "trace", "fs"] }
+tower-http = { version = "0.6", default-features = false, features = ["cors", "trace", "fs", "set-header"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -40,7 +40,7 @@ tracing-appender = "0.2"
 # D-Bus integration for Venus OS
 zbus = { version = "5.10", default-features = false, features = ["tokio"] }
 
-# HTTP client for external APIs (optional; Rustls only)
+# HTTP client for external APIs (Rustls only)
 reqwest = { version = "0.12", optional = true, default-features = false, features = ["json", "rustls-tls"] }
 
 # Date and time handling
@@ -120,7 +120,7 @@ unwrap_used = "deny"
 expect_used = "deny"
 
 [features]
-default = ["web", "dbus"]
+default = ["web", "dbus", "updater"]
 
 # Toggle API server
 web = []
@@ -133,6 +133,9 @@ openapi = ["dep:utoipa", "dep:utoipa-swagger-ui", "dep:schemars"]
 
 # Enable Tibber integration HTTP client
 tibber = ["dep:reqwest"]
+
+# Enable self-updater HTTP client
+updater = ["dep:reqwest"]
 
 # Optional compression features for tower-http
 compression = ["tower-http/compression-br", "tower-http/compression-gzip"]

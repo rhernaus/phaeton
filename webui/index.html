@@ -31,6 +31,7 @@
                     <span class="dot" id="conn_dot" aria-live="polite" aria-label="Connection status"></span>
                     <span id="conn_text">Connecting…</span>
                 </div>
+                <div class="version" title="App version"><span id="app_ver"></span></div>
                 <button
                     id="menu_toggle"
                     class="menu-button"
@@ -232,15 +233,15 @@
             <div id="updates_content" class="view-content" style="display: none">
                 <div class="card">
                     <h2>Software Updates</h2>
-                    <p>Check for new commits on the current Git branch and update.</p>
+                    <p>Check for new releases and update to a selected version.</p>
                     <div class="updates-branch">
-                        <label for="branch_select" style="margin-right: 8px; font-weight: 600; color: #475569"
-                            >Branch</label
+                        <label for="release_select" style="margin-right: 8px; font-weight: 600; color: #475569"
+                            >Version</label
                         >
-                        <select id="branch_select" class="range-select"></select>
-                        <button id="btn_switch_branch" class="save-btn-modern" style="margin-left: 8px">
-                            <span class="btn-icon">🔀</span>
-                            <span>Switch Branch</span>
+                        <select id="release_select" class="range-select"></select>
+                        <button id="btn_switch_release" class="save-btn-modern" style="margin-left: 8px">
+                            <span class="btn-icon">🔁</span>
+                            <span>Switch Version</span>
                         </button>
                     </div>
                     <div class="updates-actions">

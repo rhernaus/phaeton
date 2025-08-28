@@ -19,6 +19,7 @@ use tokio::sync::{Mutex, watch};
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::WatchStream;
 use tower_http::services::ServeDir;
+use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 #[cfg(feature = "openapi")]
 use utoipa::OpenApi;
@@ -292,7 +293,7 @@ async fn dbus_dump(State(state): State<AppState>) -> impl IntoResponse {
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/update/status", responses((status = 200))))]
 async fn update_status() -> impl IntoResponse {
     let updater = crate::updater::GitUpdater::new(
-        "https://github.com/your-org/phaeton".to_string(),
+        env!("CARGO_PKG_REPOSITORY").to_string(),
         "main".to_string(),
     );
     Json(
@@ -303,7 +304,7 @@ async fn update_status() -> impl IntoResponse {
 #[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/update/check", responses((status = 200))))]
 async fn update_check() -> impl IntoResponse {
     let mut updater = crate::updater::GitUpdater::new(
-        "https://github.com/your-org/phaeton".to_string(),
+        env!("CARGO_PKG_REPOSITORY").to_string(),
         "main".to_string(),
     );
     match updater.check_for_updates().await {
@@ -315,14 +316,44 @@ async fn update_check() -> impl IntoResponse {
     }
 }
 
+#[derive(Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+struct ApplyBody {
+    version: Option<String>,
+}
+
 #[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/update/apply", responses((status = 200))))]
-async fn update_apply() -> impl IntoResponse {
+async fn update_apply(Json(body): Json<ApplyBody>) -> impl IntoResponse {
     let mut updater = crate::updater::GitUpdater::new(
-        "https://github.com/your-org/phaeton".to_string(),
+        env!("CARGO_PKG_REPOSITORY").to_string(),
         "main".to_string(),
     );
-    match updater.apply_updates().await {
-        Ok(_) => (StatusCode::OK, Json(serde_json::json!({"status":"ok"}))),
+    let tag = body.version;
+    let res = if tag.is_some() {
+        updater.apply_release(tag).await
+    } else {
+        updater.apply_updates().await
+    };
+    match res {
+        Ok(_) => (
+            StatusCode::OK,
+            Json(serde_json::json!({"ok": true, "restarting": true})),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"ok": false, "error": e.to_string()})),
+        ),
+    }
+}
+
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/update/releases", responses((status = 200))))]
+async fn update_releases() -> impl IntoResponse {
+    let updater = crate::updater::GitUpdater::new(
+        env!("CARGO_PKG_REPOSITORY").to_string(),
+        "main".to_string(),
+    );
+    match updater.list_releases(false).await {
+        Ok(list) => (StatusCode::OK, Json(serde_json::to_value(list).unwrap())),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": e.to_string()})),
@@ -347,7 +378,7 @@ async fn events(State(state): State<AppState>) -> impl IntoResponse {
         health, status, set_mode, set_startstop, set_current,
         get_config, put_config, get_config_schema,
         logs_tail, logs_head, logs_download,
-        sessions, dbus_dump, update_status, update_check, update_apply,
+        sessions, dbus_dump, update_status, update_check, update_apply, update_releases,
         events, metrics,
     ),
     components(schemas(ModeBody, StartStopBody, SetCurrentBody, TailParams)),
@@ -358,6 +389,42 @@ pub struct ApiDoc;
 pub fn build_router(state: AppState) -> Router {
     #[cfg(feature = "openapi")]
     let openapi = ApiDoc::openapi();
+
+    // Static UI routers
+    let ui_router = Router::new()
+        .fallback_service(
+            get_service(ServeDir::new("./webui").append_index_html_on_directories(true))
+                .handle_error(|_| async { StatusCode::INTERNAL_SERVER_ERROR }),
+        )
+        .layer(SetResponseHeaderLayer::overriding(
+            header::CACHE_CONTROL,
+            header::HeaderValue::from_static("no-store, no-cache, must-revalidate, max-age=0"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::PRAGMA,
+            header::HeaderValue::from_static("no-cache"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::EXPIRES,
+            header::HeaderValue::from_static("0"),
+        ));
+    let app_router = Router::new()
+        .fallback_service(
+            get_service(ServeDir::new("./webui").append_index_html_on_directories(true))
+                .handle_error(|_| async { StatusCode::INTERNAL_SERVER_ERROR }),
+        )
+        .layer(SetResponseHeaderLayer::overriding(
+            header::CACHE_CONTROL,
+            header::HeaderValue::from_static("no-store, no-cache, must-revalidate, max-age=0"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::PRAGMA,
+            header::HeaderValue::from_static("no-cache"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::EXPIRES,
+            header::HeaderValue::from_static("0"),
+        ));
 
     let router = Router::new()
         .route("/", get(|| async { Redirect::to("/ui/index.html") }))
@@ -377,17 +444,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/update/status", get(update_status))
         .route("/api/update/check", post(update_check))
         .route("/api/update/apply", post(update_apply))
+        .route("/api/update/releases", get(update_releases))
         .route("/api/events", get(events))
-        .nest_service(
-            "/ui",
-            get_service(ServeDir::new("./webui").append_index_html_on_directories(true))
-                .handle_error(|_| async { StatusCode::INTERNAL_SERVER_ERROR }),
-        )
-        .nest_service(
-            "/app",
-            get_service(ServeDir::new("./webui").append_index_html_on_directories(true))
-                .handle_error(|_| async { StatusCode::INTERNAL_SERVER_ERROR }),
-        )
+        .nest("/ui", ui_router)
+        .nest("/app", app_router)
         .with_state(state)
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http());
@@ -447,146 +507,4 @@ pub async fn serve(driver: Arc<Mutex<AlfenDriver>>, host: &str, port: u16) -> an
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use axum::http::Request;
-    use axum::routing::get;
-    use tokio::sync::mpsc;
-    use tower::ServiceExt; // for `oneshot`
-
-    async fn test_state_async() -> AppState {
-        let (tx, rx) = mpsc::unbounded_channel();
-        let driver = crate::driver::AlfenDriver::new(rx, tx).await.unwrap();
-        let (snapshot_tx, snapshot_rx) = watch::channel(Arc::new(DriverSnapshot {
-            timestamp: chrono::Utc::now().to_rfc3339(),
-            mode: 0,
-            start_stop: 0,
-            set_current: 0.0,
-            applied_current: 0.0,
-            station_max_current: 32.0,
-            device_instance: 0,
-            product_name: None,
-            firmware: None,
-            serial: None,
-            status: 0,
-            active_phases: 0,
-            ac_power: 0.0,
-            ac_current: 0.0,
-            l1_voltage: 0.0,
-            l2_voltage: 0.0,
-            l3_voltage: 0.0,
-            l1_current: 0.0,
-            l2_current: 0.0,
-            l3_current: 0.0,
-            l1_power: 0.0,
-            l2_power: 0.0,
-            l3_power: 0.0,
-            total_energy_kwh: 0.0,
-            pricing_currency: None,
-            energy_rate: None,
-            session: serde_json::json!({}),
-            poll_duration_ms: None,
-            total_polls: 0,
-            overrun_count: 0,
-            poll_interval_ms: 1000,
-            excess_pv_power_w: 0.0,
-        }));
-        // silence unused
-        let _ = snapshot_tx;
-        AppState {
-            driver: Arc::new(Mutex::new(driver)),
-            snapshot_rx,
-        }
-    }
-
-    #[tokio::test]
-    async fn health_ok() {
-        let router = Router::new().route("/api/health", get(health));
-        let response = router
-            .oneshot(
-                Request::builder()
-                    .uri("/api/health")
-                    .body(axum::body::Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn metrics_returns_json() {
-        let state = test_state_async().await;
-        let router = Router::new()
-            .route("/api/metrics", get(metrics))
-            .with_state(state);
-        let response = router
-            .oneshot(
-                Request::builder()
-                    .uri("/api/metrics")
-                    .body(axum::body::Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert!(json.get("total_polls").is_some());
-    }
-
-    #[tokio::test]
-    async fn update_status_works() {
-        let router = Router::new().route("/api/update/status", get(update_status));
-        let response = router
-            .oneshot(
-                Request::builder()
-                    .uri("/api/update/status")
-                    .body(axum::body::Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert!(json.get("current_version").is_some());
-    }
-
-    #[tokio::test]
-    async fn update_check_ok() {
-        let router = Router::new().route("/api/update/check", post(update_check));
-        let response = router
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/update/check")
-                    .body(axum::body::Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn update_apply_fails_with_500() {
-        let router = Router::new().route("/api/update/apply", post(update_apply));
-        let response = router
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/update/apply")
-                    .body(axum::body::Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    }
-}
+// Tests moved to `src/web_tests.rs` to keep file size within budget

@@ -5,6 +5,17 @@ initConfigForm();
 initUX();
 setInterval(() => { resizeChartCanvas(); fetchStatus(); }, 2000);
 
+// Fetch app version once for header display
+(async () => {
+  try {
+    const res = await fetch('/api/update/status');
+    const s = await res.json();
+    if (s && s.current_version && document.getElementById('app_ver')) {
+      document.getElementById('app_ver').textContent = `v${s.current_version}`;
+    }
+  } catch (_) {}
+})();
+
 // Session timer soft update while charging
 setInterval(() => {
   const sessionTimeEl = document.getElementById('session_time');

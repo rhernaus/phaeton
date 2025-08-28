@@ -102,6 +102,14 @@ pub fn build_ui_schema() -> Value {
                 "host": {"type": "string", "title": "Bind address"},
                 "port": {"type": "integer", "min": 1, "max": 65535, "title": "Port"}
             }},
+            "updates": {"title": "Updates", "type": "object", "fields": {
+                "enabled": {"type": "boolean", "title": "Enable updater"},
+                "auto_check": {"type": "boolean", "title": "Auto check"},
+                "auto_update": {"type": "boolean", "title": "Auto update"},
+                "include_prereleases": {"type": "boolean", "title": "Include prereleases"},
+                "check_interval_hours": {"type": "integer", "min": 1, "max": 168, "title": "Check interval (h)"},
+                "repository": {"type": "string", "title": "Repository URL (optional)"}
+            }},
             "device_instance": {"title": "Device instance", "type": "integer", "min": 0, "max": 255},
             "poll_interval_ms": {"title": "Poll interval (ms)", "type": "integer", "min": 100, "max": 60000},
             "timezone": {"title": "Timezone", "type": "string"}
