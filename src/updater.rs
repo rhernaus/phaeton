@@ -16,6 +16,7 @@ pub struct ReleaseInfo {
     pub draft: bool,
     pub prerelease: bool,
     pub published_at: Option<String>,
+    pub body: Option<String>,
 }
 
 /// Update status information
@@ -128,6 +129,10 @@ impl GitUpdater {
                     .get("published_at")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
+                let body = r
+                    .get("body")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
                 if !tag.is_empty() {
                     out.push(ReleaseInfo {
                         tag,
@@ -135,6 +140,7 @@ impl GitUpdater {
                         draft,
                         prerelease,
                         published_at,
+                        body,
                     });
                 }
             }

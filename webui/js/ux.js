@@ -54,7 +54,62 @@ window.initUX = function () {
   const saveBtn = $('save_config'); if (saveBtn) { saveBtn.addEventListener('click', saveConfig); addButtonFeedback(saveBtn); }
   const btnCheck = $('btn_check_updates'); const btnApply = $('btn_apply_updates'); const statEl = $('updates_status'); const releaseSelect = $('release_select');
   async function refreshUpdateStatus() { try { const res = await fetch('/api/update/status'); const s = await res.json(); if (statEl) { const parts = []; if (s.current_version) parts.push(`current: ${s.current_version}`); if (s.latest_version) parts.push(`latest: ${s.latest_version}`); if (typeof s.update_available === 'boolean') parts.push(s.update_available ? 'update available' : 'up to date'); statEl.textContent = parts.join(' | '); } } catch (e) { if (statEl) statEl.textContent = 'Failed to load update status'; } }
-  async function loadReleases() { if (!releaseSelect) return; try { const r = await fetch('/api/update/releases'); const arr = await r.json(); releaseSelect.innerHTML = ''; if (!Array.isArray(arr) || arr.length === 0) { const opt = document.createElement('option'); opt.value = ''; opt.textContent = 'No releases found'; releaseSelect.appendChild(opt); releaseSelect.disabled = true; if ($('btn_switch_release')) $('btn_switch_release').disabled = true; return; } releaseSelect.disabled = false; if ($('btn_switch_release')) $('btn_switch_release').disabled = false; arr.forEach(rel => { const opt = document.createElement('option'); opt.value = String(rel.tag || rel.tag_name || ''); const label = rel.name ? `${rel.tag} - ${rel.name}` : String(rel.tag); opt.textContent = label; releaseSelect.appendChild(opt); }); } catch (e) { releaseSelect.innerHTML = ''; const opt = document.createElement('option'); opt.value = ''; opt.textContent = 'Failed to load releases'; releaseSelect.appendChild(opt); releaseSelect.disabled = true; if ($('btn_switch_release')) $('btn_switch_release').disabled = true; } }
+  async function loadReleases() {
+    if (!releaseSelect) return;
+    try {
+      const r = await fetch('/api/update/releases');
+      const arr = await r.json();
+      releaseSelect.innerHTML = '';
+      if (!Array.isArray(arr) || arr.length === 0) {
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = 'No releases found';
+        releaseSelect.appendChild(opt);
+        releaseSelect.disabled = true;
+        if ($('btn_switch_release')) $('btn_switch_release').disabled = true;
+        const rn = $('release_notes'); if (rn) rn.style.display = 'none';
+        return;
+      }
+      releaseSelect.disabled = false;
+      if ($('btn_switch_release')) $('btn_switch_release').disabled = false;
+      arr.forEach(rel => {
+        const opt = document.createElement('option');
+        opt.value = String(rel.tag || rel.tag_name || '');
+        const label = rel.name ? `${rel.tag} - ${rel.name}` : String(rel.tag);
+        opt.textContent = label;
+        opt.dataset.body = rel.body ? String(rel.body) : '';
+        releaseSelect.appendChild(opt);
+      });
+      // Show notes for selected release if present
+      const sel = releaseSelect.selectedOptions && releaseSelect.selectedOptions[0];
+      const body = sel && sel.dataset.body ? sel.dataset.body : '';
+      const box = $('release_notes');
+      const pre = $('release_notes_pre');
+      if (box && pre) {
+        if (body) { pre.textContent = body; box.style.display = ''; }
+        else { pre.textContent = ''; box.style.display = 'none'; }
+      }
+      releaseSelect.addEventListener('change', () => {
+        const s = releaseSelect.selectedOptions && releaseSelect.selectedOptions[0];
+        const b = s && s.dataset.body ? s.dataset.body : '';
+        const bx = $('release_notes');
+        const pr = $('release_notes_pre');
+        if (bx && pr) {
+          if (b) { pr.textContent = b; bx.style.display = ''; }
+          else { pr.textContent = ''; bx.style.display = 'none'; }
+        }
+      });
+    } catch (e) {
+      releaseSelect.innerHTML = '';
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = 'Failed to load releases';
+      releaseSelect.appendChild(opt);
+      releaseSelect.disabled = true;
+      if ($('btn_switch_release')) $('btn_switch_release').disabled = true;
+      const rn = $('release_notes'); if (rn) rn.style.display = 'none';
+    }
+  }
   window.loadReleases = loadReleases; if (btnCheck) { btnCheck.addEventListener('click', async () => { if (statEl) statEl.textContent = 'Checking for updates...'; try { const res = await fetch('/api/update/check', { method: 'POST' }); const s = await res.json(); const payload = s.status || s; const parts = []; if (payload.current_version) parts.push(`current: ${payload.current_version}`); if (payload.latest_version) parts.push(`latest: ${payload.latest_version}`); if (typeof payload.update_available === 'boolean') parts.push(payload.update_available ? 'update available' : 'up to date'); if (statEl) statEl.textContent = parts.join(' | '); } catch (e) { if (statEl) statEl.textContent = 'Check failed'; } }); }
   if (btnApply) { btnApply.addEventListener('click', async () => { if (statEl) statEl.textContent = 'Applying latest release and restarting...'; try { const res = await fetch('/api/update/apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}), }); const s = await res.json(); if (s && s.ok) { if (statEl) statEl.textContent = 'Restarting... please wait; reloading without cache...'; setTimeout(() => { try { const url = new URL(window.location.href); url.searchParams.set('reload', String(Date.now())); window.location.replace(url.toString()); } catch (e) { window.location.reload(); } }, 7000); } else { if (statEl) statEl.textContent = `Update failed: ${s && s.error ? s.error : 'unknown error'}`; } } catch (e) { if (statEl) statEl.textContent = 'Update failed'; } }); }
   if ($('btn_switch_release') && releaseSelect) { $('btn_switch_release').addEventListener('click', async () => { const version = releaseSelect.value; if (!version) return; if (statEl) statEl.textContent = `Switching to ${version}...`; try { const res = await fetch('/api/update/apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version }), }); const s = await res.json(); if (s && s.ok) { if (statEl) statEl.textContent = `Restarting into ${version}...`; setTimeout(() => { try { const url = new URL(window.location.href); url.searchParams.set('reload', String(Date.now())); window.location.replace(url.toString()); } catch (e) { window.location.reload(); } }, 7000); } else if (statEl) { statEl.textContent = `Switch failed: ${s && s.error ? s.error : 'unknown error'}`; } } catch (e) { if (statEl) statEl.textContent = 'Switch failed'; } }); }
