@@ -31,5 +31,5 @@ async fn updater_check_and_apply() {
     let _ = st.update_available;
 
     // Applying updates in tests is not performed; just ensure the call returns a Result
-    let _ = upd.apply_updates().await.is_ok() || upd.apply_updates().await.is_err();
+    let _ = upd.apply_updates().await;
 }
