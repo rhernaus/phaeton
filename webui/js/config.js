@@ -161,7 +161,7 @@ window.collectConfig = function (schema) {
         if (fieldDef.type === 'list') {
           // Collect list items array
           const sectionEl = document.getElementById(`section_${key}`);
-          const listWrap = sectionEl ? sectionEl.querySelector('.section-body .list-items[data-list-key="items"]') : null;
+          const listWrap = sectionEl ? sectionEl.querySelector('.section-body .list-items[data-list-key="' + fkey + '"]') : null;
           const arr = [];
           if (listWrap) {
             Array.from(listWrap.children).forEach(itemEl => {
@@ -169,7 +169,7 @@ window.collectConfig = function (schema) {
               const item = {};
               Object.keys(fields2).forEach(f2 => {
                 const input = itemEl.querySelector(`[id$="__${f2}"]`) || itemEl.querySelector('.days');
-                const { ok, value } = validateField(input, fields2[f2]); if (!ok) { throw new Error(`${key}.items.${f2}: invalid`); }
+                const { ok, value } = validateField(input, fields2[f2]); if (!ok) { throw new Error(`${key}.${fkey}.${f2}: invalid`); }
                 item[f2] = value;
               });
               arr.push(item);
