@@ -58,6 +58,15 @@ window.initUX = function () {
   if (updatesBtn) { updatesBtn.addEventListener('click', () => { switchView('updates'); if (menuDropdown) { menuDropdown.style.display = 'none'; if (menuToggle) menuToggle.setAttribute('aria-expanded','false'); } }); addButtonFeedback(updatesBtn); }
   if (statusBtn) { statusBtn.addEventListener('click', () => { switchView('status'); if (menuDropdown) { menuDropdown.style.display = 'none'; if (menuToggle) menuToggle.setAttribute('aria-expanded','false'); } }); addButtonFeedback(statusBtn); }
   if (logsBtn) { logsBtn.addEventListener('click', () => { switchView('logs'); if (menuDropdown) { menuDropdown.style.display = 'none'; if (menuToggle) menuToggle.setAttribute('aria-expanded','false'); } }); addButtonFeedback(logsBtn); }
+  // Clickable logo => Dashboard
+  const logoBtn = $('logo_button');
+  if (logoBtn) {
+    logoBtn.addEventListener('click', () => { switchView('dashboard'); });
+    logoBtn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); switchView('dashboard'); }
+    });
+    addButtonFeedback(logoBtn);
+  }
   if (menuToggle && menuDropdown) {
     menuToggle.addEventListener('click', () => { const isOpen = menuDropdown.style.display !== 'none'; menuDropdown.style.display = isOpen ? 'none' : ''; menuToggle.setAttribute('aria-expanded', String(!isOpen)); });
     document.addEventListener('click', e => { const target = e.target; if (!menuDropdown || !menuToggle) return; if (target !== menuDropdown && target !== menuToggle && !menuDropdown.contains(target) && !menuToggle.contains(target)) { if (menuDropdown.style.display !== 'none') { menuDropdown.style.display = 'none'; menuToggle.setAttribute('aria-expanded','false'); } } });
