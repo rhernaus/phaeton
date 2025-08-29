@@ -56,6 +56,10 @@ canvas {
   width: 100%;
   height: 200px;
 }
+/* Tibber chart slightly shorter by default */
+#tibber_chart {
+  height: 160px;
+}
 @media (max-width: 768px) {
   canvas {
     height: 160px;

@@ -11,7 +11,9 @@ pub mod types;
 
 // Re-exports for the public API surface
 #[cfg(feature = "tibber")]
-pub use api::{check_tibber_schedule, check_tibber_schedule_blocking, get_hourly_overview_text};
+pub use api::{
+    check_tibber_schedule, check_tibber_schedule_blocking, get_hourly_overview_text, get_plan_json,
+};
 pub use client::TibberClient;
 #[cfg(feature = "tibber")]
 pub use types::PriceLevel;
