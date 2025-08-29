@@ -58,6 +58,15 @@ window.initUX = function () {
   if (updatesBtn) { updatesBtn.addEventListener('click', () => { switchView('updates'); if (menuDropdown) { menuDropdown.style.display = 'none'; if (menuToggle) menuToggle.setAttribute('aria-expanded','false'); } }); addButtonFeedback(updatesBtn); }
   if (statusBtn) { statusBtn.addEventListener('click', () => { switchView('status'); if (menuDropdown) { menuDropdown.style.display = 'none'; if (menuToggle) menuToggle.setAttribute('aria-expanded','false'); } }); addButtonFeedback(statusBtn); }
   if (logsBtn) { logsBtn.addEventListener('click', () => { switchView('logs'); if (menuDropdown) { menuDropdown.style.display = 'none'; if (menuToggle) menuToggle.setAttribute('aria-expanded','false'); } }); addButtonFeedback(logsBtn); }
+  // Clickable logo => Dashboard
+  const logoBtn = $('logo_button');
+  if (logoBtn) {
+    logoBtn.addEventListener('click', () => { switchView('dashboard'); });
+    logoBtn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); switchView('dashboard'); }
+    });
+    addButtonFeedback(logoBtn);
+  }
   if (menuToggle && menuDropdown) {
     menuToggle.addEventListener('click', () => { const isOpen = menuDropdown.style.display !== 'none'; menuDropdown.style.display = isOpen ? 'none' : ''; menuToggle.setAttribute('aria-expanded', String(!isOpen)); });
     document.addEventListener('click', e => { const target = e.target; if (!menuDropdown || !menuToggle) return; if (target !== menuDropdown && target !== menuToggle && !menuDropdown.contains(target) && !menuToggle.contains(target)) { if (menuDropdown.style.display !== 'none') { menuDropdown.style.display = 'none'; menuToggle.setAttribute('aria-expanded','false'); } } });
@@ -132,9 +141,12 @@ window.initUX = function () {
 
 // Logs stream
 window.logsEventSource = null; window.logsPaused = false;
-window.appendLogLine = function (line) { const el = $('logs_pre'); if (!el) return; el.textContent += (el.textContent ? '\n' : '') + line; if (!logsPaused) el.scrollTop = el.scrollHeight; };
+window.appendLogLine = function (line) { const el = $('logs_pre'); if (!el) return; const escapeHtml = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); const html = window.ansiToHtml ? window.ansiToHtml(line) : escapeHtml(line); const needNL = el.innerHTML && !el.innerHTML.endsWith('\n'); el.innerHTML += (needNL ? '\n' : '') + html + '\n'; if (!logsPaused) el.scrollTop = el.scrollHeight; };
 window.ensureLogsStream = function () {
   if (logsEventSource) return; const pauseChk = $('logs_pause'); if (pauseChk) pauseChk.addEventListener('change', () => { logsPaused = !!pauseChk.checked; }); const clearBtn = $('btn_clear_logs'); if (clearBtn) clearBtn.addEventListener('click', () => { const el = $('logs_pre'); if (el) el.textContent = ''; });
+  const levelSel = $('logs_level'); if (levelSel) { levelSel.addEventListener('change', () => { fetch(`/api/logs/web_level?level=${encodeURIComponent(levelSel.value)}`, { method: 'POST' }).catch(() => {}); }); (async () => { try { const res = await fetch('/api/logs/web_level'); const js = await res.json(); if (js && js.level) { const lvl = String(js.level).toUpperCase(); if ([...levelSel.options].some(o => o.value === lvl)) levelSel.value = lvl; } } catch (e) {} })(); }
+  // Load tail on open (fire and forget)
+  (async () => { try { const r = await fetch('/api/logs/tail?lines=200'); const txt = await r.text(); if (txt) { txt.split(/\r?\n/).forEach(line => { if (line) appendLogLine(line); }); } } catch (e) {} })();
   try { logsEventSource = new EventSource('/api/logs/stream');
     // Default handler (unnamed events)
     logsEventSource.onmessage = ev => { if (typeof ev.data === 'string') appendLogLine(ev.data); };

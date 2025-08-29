@@ -19,3 +19,21 @@
   align-items: center;
   margin: 8px 0 12px 0;
 }
+
+/* Basic ANSI color classes */
+.ansi-black { color: #000000; }
+.ansi-red { color: #ef4444; }
+.ansi-green { color: #22c55e; }
+.ansi-yellow { color: #eab308; }
+.ansi-blue { color: #3b82f6; }
+.ansi-magenta { color: #d946ef; }
+.ansi-cyan { color: #06b6d4; }
+.ansi-white { color: #e2e8f0; }
+.ansi-bright-black { color: #6b7280; }
+.ansi-bright-red { color: #f87171; }
+.ansi-bright-green { color: #4ade80; }
+.ansi-bright-yellow { color: #fde047; }
+.ansi-bright-blue { color: #60a5fa; }
+.ansi-bright-magenta { color: #f472b6; }
+.ansi-bright-cyan { color: #67e8f9; }
+.ansi-bright-white { color: #ffffff; }
