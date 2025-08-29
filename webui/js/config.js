@@ -50,10 +50,45 @@ window.buildSection = function (container, key, sectionDef, cfg) {
   const chevron = document.createElement('span'); chevron.className = 'section-chevron'; chevron.textContent = '▸'; header.appendChild(chevron);
   const body = document.createElement('div'); body.className = 'section-body'; header.addEventListener('click', () => { if (section.classList.contains('open')) { section.classList.remove('open'); chevron.textContent = '▸'; } else { section.classList.add('open'); chevron.textContent = '▾'; } });
   section.appendChild(header); section.appendChild(body);
-  if (sectionDef.type === 'object') { const fields = sectionDef.fields || {}; Object.keys(fields).forEach(fkey => { const def = fields[fkey]; const value = cfg && cfg[fkey]; const fieldEl = createInput(fkey, def, value, [key, fkey]); fieldEl.dataset.path = JSON.stringify([key, fkey]); body.appendChild(fieldEl); });
+  if (sectionDef.type === 'object') {
+    const fields = sectionDef.fields || {};
+    Object.keys(fields).forEach(fkey => {
+      const def = fields[fkey]; const value = cfg && cfg[fkey];
+      if (def.type === 'list') {
+        const listWrap = document.createElement('div'); listWrap.className = 'list-items'; listWrap.dataset.listKey = fkey; const items = Array.isArray(value) ? value : [];
+        function addItem(itemCfg = {}) {
+          const itemEl = document.createElement('div'); itemEl.className = 'list-item'; const itemBody = document.createElement('div'); const fields2 = (def.item && def.item.fields) || {};
+          Object.keys(fields2).forEach(f2 => { const def2 = fields2[f2]; const val2 = itemCfg[f2]; const fieldEl2 = createInput(f2, def2, val2, [ key, fkey, String(listWrap.children.length), f2 ]); itemBody.appendChild(fieldEl2); });
+          const actions = document.createElement('div'); actions.className = 'list-actions'; const removeBtn = document.createElement('button'); removeBtn.className = 'remove-btn'; removeBtn.textContent = 'Remove'; removeBtn.addEventListener('click', () => { listWrap.removeChild(itemEl); }); actions.appendChild(removeBtn); itemEl.appendChild(itemBody); itemEl.appendChild(actions); listWrap.appendChild(itemEl);
+        }
+        items.forEach(it => addItem(it)); const add = document.createElement('button'); add.className = 'add-btn'; add.textContent = fkey === 'items' && key === 'schedule' ? 'Add schedule' : 'Add item'; add.addEventListener('click', () => addItem({})); body.appendChild(listWrap); body.appendChild(add);
+      } else {
+        const path = [key, fkey]; const fieldEl = createInput(fkey, def, value, path); fieldEl.dataset.path = JSON.stringify(path); body.appendChild(fieldEl);
+      }
+    });
+    // Special-case: when schedule.mode exists, toggle visibility of items list depending on selection
+    if (key === 'schedule' && fields.mode) {
+      const modeSelect = body.querySelector('#schedule__mode');
+      const itemsContainer = body.querySelector('.list-items[data-list-key="items"]');
+      const updateVisibility = () => {
+        const mode = modeSelect && modeSelect.value;
+        if (itemsContainer) itemsContainer.parentElement.style.display = mode === 'time' ? '' : 'none';
+        const tibberNoticeId = 'tibber_notice';
+        let notice = body.querySelector('#' + tibberNoticeId);
+        if (mode === 'tibber') {
+          if (!notice) { notice = document.createElement('div'); notice.id = tibberNoticeId; notice.style.fontSize = '13px'; notice.style.color = '#475569'; notice.textContent = 'Using Tibber pricing-based scheduling. Configure Tibber settings in the Tibber section.'; body.appendChild(notice); }
+        } else if (notice) { notice.remove(); }
+      };
+      if (modeSelect) modeSelect.addEventListener('change', updateVisibility);
+      setTimeout(updateVisibility, 0);
+    }
   } else if (sectionDef.type === 'list') {
     const listWrap = document.createElement('div'); listWrap.className = 'list-items'; const items = (cfg && cfg.items) || [];
-    function addItem(itemCfg = {}) { const itemEl = document.createElement('div'); itemEl.className = 'list-item'; const itemBody = document.createElement('div'); const fields = sectionDef.item.fields || {}; Object.keys(fields).forEach(fkey => { const def = fields[fkey]; const value = itemCfg[fkey]; const fieldEl = createInput(fkey, def, value, [ key, 'items', String(listWrap.children.length), fkey, ]); itemBody.appendChild(fieldEl); }); const actions = document.createElement('div'); actions.className = 'list-actions'; const removeBtn = document.createElement('button'); removeBtn.className = 'remove-btn'; removeBtn.textContent = 'Remove'; removeBtn.addEventListener('click', () => { listWrap.removeChild(itemEl); }); actions.appendChild(removeBtn); itemEl.appendChild(itemBody); itemEl.appendChild(actions); listWrap.appendChild(itemEl); }
+    function addItem(itemCfg = {}) {
+      const itemEl = document.createElement('div'); itemEl.className = 'list-item'; const itemBody = document.createElement('div'); const fields = sectionDef.item.fields || {};
+      Object.keys(fields).forEach(fkey => { const def = fields[fkey]; const value = itemCfg[fkey]; const fieldEl = createInput(fkey, def, value, [ key, 'items', String(listWrap.children.length), fkey, ]); itemBody.appendChild(fieldEl); });
+      const actions = document.createElement('div'); actions.className = 'list-actions'; const removeBtn = document.createElement('button'); removeBtn.className = 'remove-btn'; removeBtn.textContent = 'Remove'; removeBtn.addEventListener('click', () => { listWrap.removeChild(itemEl); }); actions.appendChild(removeBtn); itemEl.appendChild(itemBody); itemEl.appendChild(actions); listWrap.appendChild(itemEl);
+    }
     items.forEach(it => addItem(it)); const add = document.createElement('button'); add.className = 'add-btn'; add.textContent = key === 'vehicles' ? 'Add vehicle' : 'Add schedule'; add.addEventListener('click', () => addItem(key === 'vehicles' ? { provider: 'tesla', poll_interval_seconds: 60 } : { active: false, days: [], start_time: '00:00', end_time: '00:00' })); body.appendChild(listWrap); body.appendChild(add);
   } else if (sectionDef.type === 'integer' || sectionDef.type === 'string' || sectionDef.type === 'boolean') { const fieldEl = createInput(key, sectionDef, cfg, [key]); fieldEl.dataset.path = JSON.stringify([key]); body.appendChild(fieldEl); }
   container.appendChild(section);
@@ -63,6 +98,52 @@ window.buildForm = function (schema, cfg) {
   const root = $('config_form'); if (!root) return; root.innerHTML = '';
   const sections = schema.sections || {}; const nav = $('config_nav'); if (nav) nav.innerHTML = '';
   Object.keys(sections).forEach(key => { buildSection(root, key, sections[key], cfg[key]); });
+  // Wire expand/collapse controls
+  const btnExpand = $('expand_all'); const btnCollapse = $('collapse_all');
+  const setOpen = (open) => {
+    const sectionsEls = Array.from(root.getElementsByClassName('section'));
+    sectionsEls.forEach(s => { const chevron = s.querySelector('.section-chevron'); if (open) { s.classList.add('open'); if (chevron) chevron.textContent = '▾'; } else { s.classList.remove('open'); if (chevron) chevron.textContent = '▸'; } });
+  };
+  if (btnExpand) btnExpand.onclick = () => setOpen(true);
+  if (btnCollapse) btnCollapse.onclick = () => setOpen(false);
+
+  // Wire search filter
+  const search = $('config_search');
+  if (search) {
+    const normalize = (s) => (s || '').toString().toLowerCase();
+    const highlight = (el, term) => {
+      // remove existing
+      el.querySelectorAll('.highlight').forEach(h => { const parent = h.parentNode; parent.replaceChild(document.createTextNode(h.textContent), h); parent.normalize && parent.normalize(); });
+      if (!term) return;
+      const label = el.querySelector('label'); if (!label) return;
+      const text = label.textContent; const idx = text.toLowerCase().indexOf(term.toLowerCase());
+      if (idx >= 0) {
+        const before = document.createTextNode(text.slice(0, idx));
+        const mark = document.createElement('span'); mark.className = 'highlight'; mark.textContent = text.slice(idx, idx + term.length);
+        const after = document.createTextNode(text.slice(idx + term.length));
+        label.textContent = ''; label.appendChild(before); label.appendChild(mark); label.appendChild(after);
+      }
+    };
+    search.addEventListener('input', () => {
+      const term = normalize(search.value);
+      const sectionEls = Array.from(root.getElementsByClassName('section'));
+      sectionEls.forEach(section => {
+        let anyMatch = false;
+        const fields = Array.from(section.querySelectorAll('.form-field'));
+        fields.forEach(field => {
+          const label = field.querySelector('label'); const input = field.querySelector('input, select, .days');
+          const text = [label && label.textContent, input && (input.value || input.placeholder || '')].filter(Boolean).join(' ');
+          const match = term.length === 0 || normalize(text).includes(term);
+          field.style.display = match ? '' : 'none'; field.classList.toggle('match', !!term && match); highlight(field, term);
+          if (match) anyMatch = true;
+        });
+        const chevron = section.querySelector('.section-chevron');
+        if (term && anyMatch) { section.classList.add('open'); if (chevron) chevron.textContent = '▾'; }
+        else if (term && !anyMatch) { section.classList.remove('open'); if (chevron) chevron.textContent = '▸'; }
+        else { /* no search */ }
+      });
+    });
+  }
 };
 
 window.openConfigSection = function (key) {
@@ -76,7 +157,28 @@ window.collectConfig = function (schema) {
     if (def.type === 'object') {
       const fields = def.fields || {}; cfg[key] = cfg[key] || {};
       Object.keys(fields).forEach(fkey => {
-        const fieldDef = fields[fkey]; const fieldEl = Array.from(root.querySelectorAll('.form-field')).find(el => { const path = el.dataset.path && JSON.parse(el.dataset.path); return path && path[0] === key && path[1] === fkey; }); if (!fieldEl) return; const input = fieldEl.querySelector('input, select, .days'); const { ok, value } = validateField(input, fieldDef); if (!ok) { throw new Error(`${key}.${fkey}: invalid`); } cfg[key][fkey] = value;
+        const fieldDef = fields[fkey];
+        if (fieldDef.type === 'list') {
+          // Collect list items array
+          const sectionEl = document.getElementById(`section_${key}`);
+          const listWrap = sectionEl ? sectionEl.querySelector('.section-body .list-items[data-list-key="items"]') : null;
+          const arr = [];
+          if (listWrap) {
+            Array.from(listWrap.children).forEach(itemEl => {
+              const fields2 = (fieldDef.item && fieldDef.item.fields) || {};
+              const item = {};
+              Object.keys(fields2).forEach(f2 => {
+                const input = itemEl.querySelector(`[id$="__${f2}"]`) || itemEl.querySelector('.days');
+                const { ok, value } = validateField(input, fields2[f2]); if (!ok) { throw new Error(`${key}.items.${f2}: invalid`); }
+                item[f2] = value;
+              });
+              arr.push(item);
+            });
+          }
+          cfg[key][fkey] = arr;
+        } else {
+          const fieldEl = Array.from(root.querySelectorAll('.form-field')).find(el => { const path = el.dataset.path && JSON.parse(el.dataset.path); return path && path[0] === key && path[1] === fkey; }); if (!fieldEl) return; const input = fieldEl.querySelector('input, select, .days'); const { ok, value } = validateField(input, fieldDef); if (!ok) { throw new Error(`${key}.${fkey}: invalid`); } cfg[key][fkey] = value;
+        }
       });
     } else if (def.type === 'list') {
       cfg[key] = cfg[key] || {}; cfg[key].items = []; const sectionEl = document.getElementById(`section_${key}`); const listWrap = sectionEl ? sectionEl.querySelector('.section-body .list-items') : null; if (listWrap) { Array.from(listWrap.children).forEach(itemEl => { const fields = def.item.fields || {}; const item = {}; Object.keys(fields).forEach(fkey => { const input = itemEl.querySelector(`[id$="__${fkey}"]`) || itemEl.querySelector('.days'); const { ok, value } = validateField(input, fields[fkey]); if (!ok) { throw new Error(`${key}.items.${fkey}: invalid`); } item[fkey] = value; }); cfg[key].items.push(item); }); }
