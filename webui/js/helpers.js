@@ -51,20 +51,32 @@ window.formatAge = function (ms) {
 // Parse ANSI color codes to HTML spans with classes
 window.ansiToHtml = function (text) {
   if (!text || typeof text !== 'string') return '';
-  const ESC = "\u001b[";
-  const parts = text.split(ESC);
-  if (parts.length === 1) return text;
-  let out = parts[0];
-  for (let i = 1; i < parts.length; i++) {
-    const seg = parts[i];
-    const m = seg.match(/^([0-9;]+)m(.*)$/s);
-    if (!m) { out += seg; continue; }
-    const codes = m[1].split(';').map(x => parseInt(x, 10));
-    const rest = m[2];
-    let cls = '';
-    for (const c of codes) {
+
+  function escapeHtml(s) {
+    return s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  // Regex for ESC[...m sequences
+  const sgrRe = /\u001b\[((?:\d{1,3};)*\d{1,3})m/g;
+  let out = '';
+  let last = 0;
+  let openClass = null;
+
+  function closeSpan() {
+    if (openClass) { out += '</span>'; openClass = null; }
+  }
+
+  function classForCodes(codes) {
+    let cls = openClass; // default to current, override if color/reset present
+    for (let i = 0; i < codes.length; i++) {
+      const c = parseInt(codes[i], 10);
       switch (c) {
-        case 0: cls = ''; break; // reset
+        case 0: // reset all
+        case 39: // default foreground
+          cls = null; break;
         case 30: cls = 'ansi-black'; break;
         case 31: cls = 'ansi-red'; break;
         case 32: cls = 'ansi-green'; break;
@@ -81,13 +93,38 @@ window.ansiToHtml = function (text) {
         case 95: cls = 'ansi-bright-magenta'; break;
         case 96: cls = 'ansi-bright-cyan'; break;
         case 97: cls = 'ansi-bright-white'; break;
-        default: break;
+        default: /* ignore other SGR codes like bold, etc. */ break;
       }
     }
-    if (cls) out += `<span class="${cls}">`;
-    out += rest.replace(/\u001b\[[0-9;]*m/g, '</span>');
-    if (cls && !out.endsWith('</span>')) out += '</span>';
+    return cls;
   }
+
+  let m;
+  while ((m = sgrRe.exec(text)) !== null) {
+    // Plain chunk before this SGR -> escape and append
+    if (m.index > last) {
+      out += escapeHtml(text.slice(last, m.index));
+    }
+
+    // Determine the new class to apply
+    const codes = m[1].split(';');
+    const nextClass = classForCodes(codes);
+    if (nextClass !== openClass) {
+      // Close previous span if any, then open a new one if needed
+      closeSpan();
+      if (nextClass) { out += `<span class="${nextClass}">`; openClass = nextClass; }
+    }
+
+    last = sgrRe.lastIndex;
+  }
+
+  // Trailing plain text
+  if (last < text.length) {
+    out += escapeHtml(text.slice(last));
+  }
+
+  // Ensure we always end with balanced tags
+  closeSpan();
   return out;
 };
 
