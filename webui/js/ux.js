@@ -135,7 +135,12 @@ window.logsEventSource = null; window.logsPaused = false;
 window.appendLogLine = function (line) { const el = $('logs_pre'); if (!el) return; el.textContent += (el.textContent ? '\n' : '') + line; if (!logsPaused) el.scrollTop = el.scrollHeight; };
 window.ensureLogsStream = function () {
   if (logsEventSource) return; const pauseChk = $('logs_pause'); if (pauseChk) pauseChk.addEventListener('change', () => { logsPaused = !!pauseChk.checked; }); const clearBtn = $('btn_clear_logs'); if (clearBtn) clearBtn.addEventListener('click', () => { const el = $('logs_pre'); if (el) el.textContent = ''; });
-  try { logsEventSource = new EventSource('/api/logs/stream'); logsEventSource.onmessage = ev => { if (typeof ev.data === 'string') appendLogLine(ev.data); }; logsEventSource.onerror = () => { if (logsEventSource) { logsEventSource.close(); logsEventSource = null; } setTimeout(ensureLogsStream, 2000); }; } catch (e) {}
+  try { logsEventSource = new EventSource('/api/logs/stream');
+    // Default handler (unnamed events)
+    logsEventSource.onmessage = ev => { if (typeof ev.data === 'string') appendLogLine(ev.data); };
+    // Named event emitted by server: "log"
+    logsEventSource.addEventListener('log', ev => { if (ev && typeof ev.data === 'string') appendLogLine(ev.data); });
+    logsEventSource.onerror = () => { if (logsEventSource) { logsEventSource.close(); logsEventSource = null; } setTimeout(ensureLogsStream, 2000); }; } catch (e) {}
 };
 
 

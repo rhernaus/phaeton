@@ -1,6 +1,8 @@
 //! Axum-based HTTP server with OpenAPI (utoipa) and Swagger UI
 
 use crate::driver::{AlfenDriver, DriverSnapshot};
+#[cfg(feature = "tibber")]
+use crate::tibber;
 use crate::web_schema;
 use axum::response::Redirect;
 use axum::response::sse::{Event, KeepAlive, Sse};
@@ -130,6 +132,36 @@ async fn set_current(
     let mut drv = state.driver.lock().await;
     drv.set_intended_current(body.amps).await;
     (StatusCode::OK, Json(serde_json::json!({"ok":true})))
+}
+
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/tibber/plan", responses((status = 200))))]
+async fn tibber_plan(State(_state): State<AppState>) -> impl IntoResponse {
+    #[cfg(feature = "tibber")]
+    {
+        let cfg = {
+            let drv = _state.driver.lock().await;
+            drv.config().tibber.clone()
+        };
+        match tibber::get_plan_json(&cfg).await {
+            Ok(v) => Json(v).into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": e.to_string()})),
+            )
+                .into_response(),
+        }
+    }
+    #[cfg(not(feature = "tibber"))]
+    {
+        (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "error": "Tibber feature disabled",
+                "points": []
+            })),
+        )
+            .into_response()
+    }
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/config", responses((status = 200))))]
@@ -433,7 +465,7 @@ async fn events(State(state): State<AppState>) -> impl IntoResponse {
         logs_tail, logs_head, logs_download,
         logs_stream,
         sessions, dbus_dump, update_status, update_check, update_apply, update_releases,
-        events, metrics,
+        events, metrics, tibber_plan,
     ),
     components(schemas(ModeBody, StartStopBody, SetCurrentBody, TailParams)),
     tags((name = "phaeton", description = "Phaeton EV Charger API"))
@@ -488,6 +520,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/mode", post(set_mode))
         .route("/api/startstop", post(set_startstop))
         .route("/api/set_current", post(set_current))
+        .route("/api/tibber/plan", get(tibber_plan))
         .route("/api/config", get(get_config).put(put_config))
         .route("/api/config/schema", get(get_config_schema))
         .route("/api/logs/tail", get(logs_tail))

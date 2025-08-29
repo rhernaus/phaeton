@@ -150,6 +150,29 @@
                         </div>
                     </div>
 
+                    <!-- Tibber Prices Section (visible when using Tibber scheduling) -->
+                    <div class="chart-section" id="tibber_section" style="display: none">
+                        <div class="chart-header">
+                            <h3>Day-Ahead Electricity Prices (Tibber)</h3>
+                            <div class="chart-controls">
+                                <span>Plan overlay</span>
+                                <label class="modern-toggle">
+                                    <input type="checkbox" id="tibber_overlay_toggle" checked />
+                                    <span class="toggle-slider"></span>
+                                    <span class="toggle-label">Show planned charge hours</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div style="position: relative">
+                            <canvas id="tibber_chart" width="800" height="160"></canvas>
+                            <div id="tibber_tooltip" class="chart-tooltip" style="display: none"></div>
+                        </div>
+                        <div class="chart-legend">
+                            <span class="legend-item"><span class="legend-dot" style="background:#3b82f6"></span>Total price (€/kWh)</span>
+                            <span class="legend-item"><span class="legend-dot" style="background:#10b981"></span>Planned charging</span>
+                        </div>
+                    </div>
+
                     <!-- Session info cards -->
                     <div class="info-grid">
                         <div class="info-card">
@@ -330,6 +353,7 @@
 
             <script src="/ui/js/helpers.js"></script>
             <script src="/ui/js/chart.js"></script>
+            <script src="/ui/js/tibber.js"></script>
             <script src="/ui/js/config.js"></script>
             <script src="/ui/js/ux.js"></script>
             <script src="/ui/js/status.js"></script>

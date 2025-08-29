@@ -414,6 +414,72 @@ async fn events_stream_status_ok() {
 }
 
 #[tokio::test]
+async fn logs_stream_emits_named_log_events() {
+    use axum::http::header;
+    use http_body_util::BodyExt as _;
+    use std::time::Duration;
+
+    // Ensure logging is initialized so broadcast layer is active in tests
+    let _ = crate::logging::init_logging(&crate::config::LoggingConfig::default());
+
+    // Build router for SSE logs endpoint
+    let router = axum::Router::new().route("/api/logs/stream", get(logs_stream));
+
+    let mut response = router
+        .oneshot(
+            Request::builder()
+                .uri("/api/logs/stream")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    let ct = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("");
+    assert!(ct.contains("text/event-stream"));
+
+    // Spawn a log event shortly after to feed the stream
+    tokio::spawn(async {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        let logger = crate::logging::get_logger("test_sse");
+        logger.info("sse_test_line_123");
+    });
+
+    // Read frames until we observe the test log line or timeout
+    let mut body = response.into_body();
+    let mut buf: Vec<u8> = Vec::new();
+    let wait = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if let Some(frame) = body.frame().await {
+                if let Ok(frame) = frame {
+                    if let Some(data) = frame.data_ref() {
+                        buf.extend_from_slice(data);
+                        if buf.windows(b"sse_test_line_123".len()).any(|w| w == b"sse_test_line_123") {
+                            break;
+                        }
+                    }
+                } else {
+                    // Body error or end; break to assert
+                    break;
+                }
+            }
+        }
+    })
+    .await;
+
+    assert!(wait.is_ok(), "timed out waiting for SSE log event");
+    let s = String::from_utf8_lossy(&buf);
+    assert!(s.contains("event: log"), "SSE should include named 'log' event: {}", s);
+    assert!(s.contains("data:"), "SSE should include data line: {}", s);
+    assert!(s.contains("sse_test_line_123"), "SSE data should contain the test line: {}", s);
+}
+
+#[tokio::test]
 async fn root_redirects_to_ui() {
     let state = test_state_async().await;
     let app = build_router(state);
@@ -433,5 +499,59 @@ async fn root_redirects_to_ui() {
         .and_then(|h| h.to_str().ok())
         .unwrap_or("");
     assert_eq!(loc, "/ui/index.html");
+}
+
+#[tokio::test]
+async fn tibber_plan_feature_disabled_returns_placeholder() {
+    let state = test_state_async().await;
+    let router = axum::Router::new()
+        .route("/api/tibber/plan", get(tibber_plan))
+        .with_state(state);
+    let resp = router
+        .oneshot(
+            Request::builder()
+                .uri("/api/tibber/plan")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(json.get("points").is_some());
+    // When tibber feature is disabled at compile-time
+    // endpoint returns placeholder error
+    if let Some(e) = json.get("error").and_then(|v| v.as_str()) {
+        assert_eq!(e, "Tibber feature disabled");
+    }
+}
+
+#[cfg(feature = "tibber")]
+#[tokio::test]
+async fn tibber_plan_without_token_returns_error_no_token() {
+    let state = test_state_async().await;
+    let router = axum::Router::new()
+        .route("/api/tibber/plan", get(tibber_plan))
+        .with_state(state);
+    let resp = router
+        .oneshot(
+            Request::builder()
+                .uri("/api/tibber/plan")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(json.get("points").is_some());
+    let err = json.get("error").and_then(|v| v.as_str()).unwrap_or("");
+    assert_eq!(err, "No Tibber access token configured");
 }
 
