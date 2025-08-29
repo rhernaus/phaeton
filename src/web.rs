@@ -7,9 +7,9 @@ use axum::response::Redirect;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::{
     Json, Router,
-    extract::{Query, State},
+    extract::State,
     http::{StatusCode, header},
-    response::{IntoResponse, Response},
+    response::IntoResponse,
     routing::{get, get_service, post},
 };
 use serde::Deserialize;
@@ -17,7 +17,6 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use tokio::sync::{Mutex, watch};
 use tokio_stream::StreamExt;
-use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::WatchStream;
 use tower_http::services::ServeDir;
 use tower_http::set_header::SetResponseHeaderLayer;
@@ -26,6 +25,9 @@ use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use utoipa::OpenApi;
 #[cfg(feature = "openapi")]
 use utoipa_swagger_ui::SwaggerUi;
+
+mod logs;
+pub use logs::{logs_download, logs_head, logs_stream, logs_tail};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -66,7 +68,16 @@ async fn health() -> impl IntoResponse {
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/metrics", responses((status = 200))))]
 async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
     let snap = state.snapshot_rx.borrow().clone();
-    let age_ms = chrono::DateTime::parse_from_rfc3339(&snap.timestamp).ok().and_then(|ts| chrono::Utc::now().signed_duration_since(ts.with_timezone(&chrono::Utc)).to_std().ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
+    let age_ms = chrono::DateTime::parse_from_rfc3339(&snap.timestamp)
+        .ok()
+        .and_then(|ts| {
+            chrono::Utc::now()
+                .signed_duration_since(ts.with_timezone(&chrono::Utc))
+                .to_std()
+                .ok()
+        })
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
     Json(serde_json::json!({
         "age_ms": age_ms,
         "poll_duration_ms": snap.poll_duration_ms,
@@ -212,112 +223,7 @@ async fn get_config_schema() -> impl IntoResponse {
     Json(web_schema::build_ui_schema())
 }
 
-#[derive(Debug, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema, utoipa::IntoParams))]
-pub struct TailParams {
-    pub lines: Option<usize>,
-}
-
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/logs/tail", params(TailParams), responses((status = 200))))]
-async fn logs_tail(
-    State(state): State<AppState>,
-    Query(params): Query<TailParams>,
-) -> impl IntoResponse {
-    let (path, max_lines) = {
-        let drv = state.driver.lock().await;
-        (
-            drv.config().logging.file.clone(),
-            params.lines.unwrap_or(200).min(10_000),
-        )
-    };
-    match tokio::fs::read_to_string(&path).await {
-        Ok(contents) => {
-            let mut lines: Vec<&str> = contents.lines().collect();
-            if lines.len() > max_lines {
-                lines = lines.split_off(lines.len() - max_lines);
-            }
-            let body = lines.join("\n");
-            let mut resp = Response::new(body.into());
-            resp.headers_mut().insert(
-                header::CONTENT_TYPE,
-                header::HeaderValue::from_static("text/plain; charset=utf-8"),
-            );
-            resp
-        }
-        Err(_) => (StatusCode::NOT_FOUND, "Log file not available").into_response(),
-    }
-}
-
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/logs/head", params(TailParams), responses((status = 200))))]
-async fn logs_head(
-    State(state): State<AppState>,
-    Query(params): Query<TailParams>,
-) -> impl IntoResponse {
-    let (path, max_lines) = {
-        let drv = state.driver.lock().await;
-        (
-            drv.config().logging.file.clone(),
-            params.lines.unwrap_or(200).min(10_000),
-        )
-    };
-    match tokio::fs::read_to_string(&path).await {
-        Ok(contents) => {
-            let mut lines: Vec<&str> = contents.lines().collect();
-            if lines.len() > max_lines {
-                lines.truncate(max_lines);
-            }
-            let body = lines.join("\n");
-            let mut resp = Response::new(body.into());
-            resp.headers_mut().insert(
-                header::CONTENT_TYPE,
-                header::HeaderValue::from_static("text/plain; charset=utf-8"),
-            );
-            resp
-        }
-        Err(_) => (StatusCode::NOT_FOUND, "Log file not available").into_response(),
-    }
-}
-
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/logs/stream", responses((status = 200))))]
-async fn logs_stream() -> impl IntoResponse {
-    let rx = crate::logging::subscribe_log_lines();
-    let stream = BroadcastStream::new(rx).filter_map(|res| match res {
-        Ok(line) if crate::logging::should_emit_to_web(&line) => Some(Ok::<Event, std::convert::Infallible>(Event::default().event("log").data(line))),
-        _ => None,
-    });
-    Sse::new(stream).keep_alive(KeepAlive::default())
-}
-
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/logs/download", responses((status = 200))))]
-async fn logs_download(State(state): State<AppState>) -> impl IntoResponse {
-    let path = {
-        let drv = state.driver.lock().await;
-        drv.config().logging.file.clone()
-    };
-    match tokio::fs::read(&path).await {
-        Ok(bytes) => {
-            let mut resp = Response::new(bytes.into());
-            resp.headers_mut().insert(
-                header::CONTENT_TYPE,
-                header::HeaderValue::from_static("application/octet-stream"),
-            );
-            resp
-        }
-        Err(_) => (StatusCode::NOT_FOUND, "Log file not available").into_response(),
-    }
-}
-
-#[derive(Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema, utoipa::IntoParams))]
-struct WebLevelQuery {
-    level: String,
-}
-
-#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/logs/web_level", params(WebLevelQuery), responses((status = 200))))]
-async fn set_web_log_level(Query(q): Query<WebLevelQuery>) -> impl IntoResponse { match crate::logging::set_web_log_level_str(&q.level) { Ok(_) => (StatusCode::OK, Json(serde_json::json!({"ok": true, "level": q.level}))), Err(e) => (StatusCode::BAD_REQUEST, Json(serde_json::json!({"ok": false, "error": e.to_string()}))), } }
-
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/logs/web_level", responses((status = 200))))]
-async fn get_web_log_level() -> impl IntoResponse { let lvl = crate::logging::get_web_log_level(); let level_str = format!("{:?}", lvl); Json(serde_json::json!({"level": level_str})) }
+// logs routes moved to web::logs module
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/sessions", responses((status = 200))))]
 async fn sessions(State(state): State<AppState>) -> impl IntoResponse {
@@ -412,7 +318,10 @@ async fn update_apply(
             StatusCode::OK,
             Json(serde_json::json!({"ok": true, "restarting": true})),
         ),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"ok": false, "error": e.to_string()}))),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"ok": false, "error": e.to_string()})),
+        ),
     }
 }
 
@@ -454,12 +363,12 @@ async fn events(State(state): State<AppState>) -> impl IntoResponse {
     paths(
         health, status, set_mode, set_startstop, set_current,
         get_config, put_config, get_config_schema,
-        logs_tail, logs_head, logs_download,
-        logs_stream,
+        crate::web::logs::logs_tail, crate::web::logs::logs_head, crate::web::logs::logs_download,
+        crate::web::logs::logs_stream,
         sessions, dbus_dump, update_status, update_check, update_apply, update_releases,
         events, metrics, tibber_plan,
     ),
-    components(schemas(ModeBody, StartStopBody, SetCurrentBody, TailParams)),
+    components(schemas(ModeBody, StartStopBody, SetCurrentBody, crate::web::logs::TailParams)),
     tags((name = "phaeton", description = "Phaeton EV Charger API"))
 )]
 pub struct ApiDoc;
@@ -515,14 +424,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/tibber/plan", get(tibber_plan))
         .route("/api/config", get(get_config).put(put_config))
         .route("/api/config/schema", get(get_config_schema))
-        .route("/api/logs/tail", get(logs_tail))
-        .route("/api/logs/head", get(logs_head))
-        .route("/api/logs/download", get(logs_download))
-        .route("/api/logs/stream", get(logs_stream))
-        .route(
-            "/api/logs/web_level",
-            post(set_web_log_level).get(get_web_log_level),
-        )
+        .merge(logs::routes())
         .route("/api/sessions", get(sessions))
         .route("/api/dbus", get(dbus_dump))
         .route("/api/update/status", get(update_status))
