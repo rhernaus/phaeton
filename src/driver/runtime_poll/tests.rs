@@ -1,4 +1,4 @@
-use super::*;
+use super::meas::LineTriplet;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 

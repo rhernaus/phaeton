@@ -1,97 +1,11 @@
 use crate::error::Result;
 use std::sync::Arc;
 
-struct LineTriplet {
-    l1: f64,
-    l2: f64,
-    l3: f64,
-}
-
-struct RealtimeMeasurements {
-    voltages: LineTriplet,
-    currents: LineTriplet,
-    powers: LineTriplet,
-    total_power: f64,
-    energy_kwh: f64,
-    status: i32,
-}
+pub mod meas;
+use meas::RealtimeMeasurements;
 
 impl super::AlfenDriver {
-    fn decode_triplet(regs: &Option<Vec<u16>>) -> LineTriplet {
-        if let Some(v) = regs
-            && v.len() >= 6
-        {
-            let a = crate::modbus::decode_32bit_float(&v[0..2]).unwrap_or(0.0) as f64;
-            let b = crate::modbus::decode_32bit_float(&v[2..4]).unwrap_or(0.0) as f64;
-            let c = crate::modbus::decode_32bit_float(&v[4..6]).unwrap_or(0.0) as f64;
-            return LineTriplet {
-                l1: a,
-                l2: b,
-                l3: c,
-            };
-        }
-        LineTriplet {
-            l1: 0.0,
-            l2: 0.0,
-            l3: 0.0,
-        }
-    }
-
-    fn decode_energy_kwh(regs: &Option<Vec<u16>>) -> f64 {
-        if let Some(v) = regs
-            && v.len() >= 4
-        {
-            return crate::modbus::decode_64bit_float(&v[0..4]).unwrap_or(0.0) / 1000.0;
-        }
-        0.0
-    }
-
-    fn decode_powers(
-        power_regs: &Option<Vec<u16>>,
-        voltages: &LineTriplet,
-        currents: &LineTriplet,
-    ) -> (LineTriplet, f64) {
-        let (mut l1, mut l2, mut l3, mut total) = if let Some(v) = power_regs {
-            if v.len() >= 8 {
-                let p1 = crate::modbus::decode_32bit_float(&v[0..2]).unwrap_or(0.0) as f64;
-                let p2 = crate::modbus::decode_32bit_float(&v[2..4]).unwrap_or(0.0) as f64;
-                let p3 = crate::modbus::decode_32bit_float(&v[4..6]).unwrap_or(0.0) as f64;
-                let pt = crate::modbus::decode_32bit_float(&v[6..8]).unwrap_or(0.0) as f64;
-                let sanitize = |x: f64| if x.is_finite() { x } else { 0.0 };
-                (sanitize(p1), sanitize(p2), sanitize(p3), sanitize(pt))
-            } else {
-                (0.0, 0.0, 0.0, 0.0)
-            }
-        } else {
-            (0.0, 0.0, 0.0, 0.0)
-        };
-
-        let approx = |v: f64, i: f64| (v * i).round();
-        if l1.abs() < 1.0 {
-            l1 = approx(voltages.l1, currents.l1);
-        }
-        if l2.abs() < 1.0 {
-            l2 = approx(voltages.l2, currents.l2);
-        }
-        if l3.abs() < 1.0 {
-            l3 = approx(voltages.l3, currents.l3);
-        }
-        if total.abs() < 1.0 {
-            total = l1 + l2 + l3;
-        }
-
-        (LineTriplet { l1, l2, l3 }, total)
-    }
-
-    fn compute_status_from_regs(status_regs: &Option<Vec<u16>>) -> i32 {
-        if let Some(v) = status_regs
-            && v.len() >= 5
-        {
-            let s = crate::modbus::decode_string(&v[0..5], None).unwrap_or_default();
-            return Self::map_alfen_status_to_victron(&s) as i32;
-        }
-        0
-    }
+    // decode_* and compute_status_* moved to meas.rs
 
     /// Derive Victron-esque status from base hardware status and current context.
     ///
@@ -198,32 +112,44 @@ impl super::AlfenDriver {
 
         let manager = self.modbus_manager.as_mut().unwrap();
 
+        let t0 = std::time::Instant::now();
         let voltages = manager
             .read_holding_registers(socket_id, addr_voltages, 6)
             .await
             .ok();
+        let read_voltages_ms = t0.elapsed().as_millis() as u64;
 
+        let t1 = std::time::Instant::now();
         let currents = manager
             .read_holding_registers(socket_id, addr_currents, 6)
             .await
             .ok();
+        let read_currents_ms = t1.elapsed().as_millis() as u64;
 
+        let t2 = std::time::Instant::now();
         let power_regs = manager
             .read_holding_registers(socket_id, addr_power, 8)
             .await
             .ok();
+        let read_powers_ms = t2.elapsed().as_millis() as u64;
 
+        let t3 = std::time::Instant::now();
         let energy_regs = manager
             .read_holding_registers(socket_id, addr_energy, 4)
             .await
             .ok();
+        let read_energy_ms = t3.elapsed().as_millis() as u64;
 
+        let t4 = std::time::Instant::now();
         let status_regs = manager
             .read_holding_registers(socket_id, addr_status, 5)
             .await
             .ok();
+        let read_status_ms = t4.elapsed().as_millis() as u64;
 
+        let t5 = std::time::Instant::now();
         self.update_station_max_current_from_modbus().await;
+        let read_station_max_ms = t5.elapsed().as_millis() as u64;
 
         let voltages_triplet = Self::decode_triplet(&voltages);
         let currents_triplet = Self::decode_triplet(&currents);
@@ -231,6 +157,18 @@ impl super::AlfenDriver {
             Self::decode_powers(&power_regs, &voltages_triplet, &currents_triplet);
         let energy_kwh = Self::decode_energy_kwh(&energy_regs);
         let status = Self::compute_status_from_regs(&status_regs);
+
+        // Record timings for this segment
+        self.last_poll_steps
+            .get_or_insert_with(Default::default)
+            .read_voltages_ms = Some(read_voltages_ms);
+        if let Some(ref mut steps) = self.last_poll_steps {
+            steps.read_currents_ms = Some(read_currents_ms);
+            steps.read_powers_ms = Some(read_powers_ms);
+            steps.read_energy_ms = Some(read_energy_ms);
+            steps.read_status_ms = Some(read_status_ms);
+            steps.read_station_max_ms = Some(read_station_max_ms);
+        }
 
         RealtimeMeasurements {
             voltages: voltages_triplet,
@@ -530,11 +468,13 @@ impl super::AlfenDriver {
             .as_secs_f64();
             let requested = self.intended_set_current;
 
+            let t_pv0 = std::time::Instant::now();
             let ev_power_for_subtract = self.ev_power_for_subtract(m.total_power);
             let excess_pv_power_w: f32 = self
                 .calculate_excess_pv_power(ev_power_for_subtract)
                 .await
                 .unwrap_or(0.0);
+            let pv_excess_ms = t_pv0.elapsed().as_millis() as u64;
             // Track excess PV for snapshots, with optional EMA smoothing
             let alpha = self.config.controls.pv_excess_ema_alpha.clamp(0.0, 1.0);
             let smoothed = if alpha > 0.0 {
@@ -543,13 +483,17 @@ impl super::AlfenDriver {
                 excess_pv_power_w
             };
             self.last_excess_pv_power_w = smoothed;
+            let t_eff0 = std::time::Instant::now();
             let (effective, soc_below_min) = self
                 .compute_effective_current_with_soc(requested, now_secs, excess_pv_power_w)
                 .await;
+            let compute_effective_ms = t_eff0.elapsed().as_millis() as u64;
 
             let (should_update, _need_change, _interval_due) =
                 self.apply_current_if_needed(effective, excess_pv_power_w);
+            let mut write_current_ms: Option<u64> = None;
             if should_update {
+                let t_wr0 = std::time::Instant::now();
                 if self.write_effective_current(effective).await {
                     self.last_sent_current = effective;
                     self.last_current_set_time = std::time::Instant::now();
@@ -557,15 +501,30 @@ impl super::AlfenDriver {
                 } else {
                     self.logger.warn("Failed to write set current via Modbus");
                 }
+                write_current_ms = Some(t_wr0.elapsed().as_millis() as u64);
             }
 
             // Derive final status from base status and context
             let derived_status = self.derive_status(m.status, soc_below_min) as u8;
+            let t_fin0 = std::time::Instant::now();
             self.finalize_cycle(&m, derived_status, effective)?;
+            let finalize_ms = t_fin0.elapsed().as_millis() as u64;
+
+            // Save per-step timings
+            let mut steps = self.last_poll_steps.take().unwrap_or_default();
+            steps.pv_excess_ms = Some(pv_excess_ms);
+            steps.compute_effective_ms = Some(compute_effective_ms);
+            steps.write_current_ms = write_current_ms;
+            steps.finalize_cycle_ms = Some(finalize_ms);
+            self.last_poll_steps = Some(steps);
         }
 
         self.logger.debug("Poll cycle completed");
+        let t_snap0 = std::time::Instant::now();
         let snapshot = Arc::new(self.build_typed_snapshot(Some(self.last_poll_duration_ms())));
+        if let Some(ref mut steps) = self.last_poll_steps {
+            steps.snapshot_build_ms = Some(t_snap0.elapsed().as_millis() as u64);
+        }
         let _ = self.status_snapshot_tx.send(snapshot);
         Ok(())
     }

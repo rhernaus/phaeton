@@ -95,14 +95,21 @@ window.buildSection = function (container, key, sectionDef, cfg) {
     // Special-case: when schedule.mode exists, toggle visibility of items list depending on selection
     if (key === 'schedule' && fields.mode) {
       const modeSelect = body.querySelector('#schedule__mode');
-      const itemsContainer = body.querySelector('.list-items[data-list-key="items"]');
       const updateVisibility = () => {
         const mode = modeSelect && modeSelect.value;
-        if (itemsContainer) itemsContainer.parentElement.style.display = mode === 'time' ? '' : 'none';
+        // Keep schedule items visible for management in all modes.
+        // Add an informational notice when Tibber mode is selected.
         const tibberNoticeId = 'tibber_notice';
         let notice = body.querySelector('#' + tibberNoticeId);
         if (mode === 'tibber') {
-          if (!notice) { notice = document.createElement('div'); notice.id = tibberNoticeId; notice.style.fontSize = '13px'; notice.style.color = '#475569'; notice.textContent = 'Using Tibber pricing-based scheduling. Configure Tibber settings in the Tibber section.'; body.appendChild(notice); }
+          if (!notice) {
+            notice = document.createElement('div');
+            notice.id = tibberNoticeId;
+            notice.style.fontSize = '13px';
+            notice.style.color = '#475569';
+            notice.textContent = 'Tibber mode active: time-based schedules below are editable but inactive until you switch mode to "time".';
+            body.appendChild(notice);
+          }
         } else if (notice) { notice.remove(); }
       };
       if (modeSelect) modeSelect.addEventListener('change', updateVisibility);

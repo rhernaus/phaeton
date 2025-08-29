@@ -116,6 +116,7 @@ impl super::AlfenDriver {
                 super::types::DriverState::Error(_) => "Error".to_string(),
                 super::types::DriverState::ShuttingDown => "ShuttingDown".to_string(),
             },
+            poll_steps_ms: self.last_poll_steps.clone(),
         }
     }
 }

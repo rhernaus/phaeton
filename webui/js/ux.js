@@ -107,8 +107,23 @@ window.initUX = function () {
       const box = $('release_notes');
       const htmlBox = $('release_notes_html');
       if (box && htmlBox) {
-        if (bodyHtml) { htmlBox.innerHTML = bodyHtml; box.style.display = ''; }
-        else { htmlBox.innerHTML = ''; box.style.display = 'none'; }
+        if (bodyHtml) {
+          htmlBox.innerHTML = bodyHtml;
+          if (window.setSafeLinks) window.setSafeLinks(htmlBox);
+          box.style.display = '';
+        } else {
+          // Fallback to plain text body if available and linkify it
+          const sel2 = releaseSelect.selectedOptions && releaseSelect.selectedOptions[0];
+          const bodyTxt = sel2 && sel2.dataset.body ? String(sel2.dataset.body) : '';
+          if (bodyTxt) {
+            htmlBox.innerHTML = window.linkifyText ? window.linkifyText(bodyTxt) : window.escapeHtml(bodyTxt).replace(/\n/g,'<br/>');
+            if (window.setSafeLinks) window.setSafeLinks(htmlBox);
+            box.style.display = '';
+          } else {
+            htmlBox.innerHTML = '';
+            box.style.display = 'none';
+          }
+        }
       }
       releaseSelect.addEventListener('change', () => {
         const s = releaseSelect.selectedOptions && releaseSelect.selectedOptions[0];
@@ -116,8 +131,21 @@ window.initUX = function () {
         const bx = $('release_notes');
         const htmlEl = $('release_notes_html');
         if (bx && htmlEl) {
-          if (bHtml) { htmlEl.innerHTML = bHtml; bx.style.display = ''; }
-          else { htmlEl.innerHTML = ''; bx.style.display = 'none'; }
+          if (bHtml) {
+            htmlEl.innerHTML = bHtml;
+            if (window.setSafeLinks) window.setSafeLinks(htmlEl);
+            bx.style.display = '';
+          } else {
+            const bodyTxt2 = s && s.dataset.body ? String(s.dataset.body) : '';
+            if (bodyTxt2) {
+              htmlEl.innerHTML = window.linkifyText ? window.linkifyText(bodyTxt2) : window.escapeHtml(bodyTxt2).replace(/\n/g,'<br/>');
+              if (window.setSafeLinks) window.setSafeLinks(htmlEl);
+              bx.style.display = '';
+            } else {
+              htmlEl.innerHTML = '';
+              bx.style.display = 'none';
+            }
+          }
         }
       });
     } catch (e) {
@@ -145,8 +173,17 @@ window.appendLogLine = function (line) { const el = $('logs_pre'); if (!el) retu
 window.ensureLogsStream = function () {
   if (logsEventSource) return; const pauseChk = $('logs_pause'); if (pauseChk) pauseChk.addEventListener('change', () => { logsPaused = !!pauseChk.checked; }); const clearBtn = $('btn_clear_logs'); if (clearBtn) clearBtn.addEventListener('click', () => { const el = $('logs_pre'); if (el) el.textContent = ''; });
   const levelSel = $('logs_level'); if (levelSel) { levelSel.addEventListener('change', () => { fetch(`/api/logs/web_level?level=${encodeURIComponent(levelSel.value)}`, { method: 'POST' }).catch(() => {}); }); (async () => { try { const res = await fetch('/api/logs/web_level'); const js = await res.json(); if (js && js.level) { const lvl = String(js.level).toUpperCase(); if ([...levelSel.options].some(o => o.value === lvl)) levelSel.value = lvl; } } catch (e) {} })(); }
-  // Load tail on open (fire and forget)
-  (async () => { try { const r = await fetch('/api/logs/tail?lines=200'); const txt = await r.text(); if (txt) { txt.split(/\r?\n/).forEach(line => { if (line) appendLogLine(line); }); } } catch (e) {} })();
+  // Load tail on open (fire and forget). If not available (404), skip quietly.
+  (async () => {
+    try {
+      const r = await fetch('/api/logs/tail?lines=200');
+      if (!r.ok) return;
+      const txt = await r.text();
+      if (txt) {
+        txt.split(/\r?\n/).forEach(line => { if (line) appendLogLine(line); });
+      }
+    } catch (e) {}
+  })();
   try { logsEventSource = new EventSource('/api/logs/stream');
     // Default handler (unnamed events)
     logsEventSource.onmessage = ev => { if (typeof ev.data === 'string') appendLogLine(ev.data); };

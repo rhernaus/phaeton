@@ -129,3 +129,48 @@ window.ansiToHtml = function (text) {
 };
 
 
+// Simple HTML escaper for general use
+window.escapeHtml = function (s) {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+};
+
+// Linkify plain text URLs into clickable anchors (opens in new tab)
+window.linkifyText = function (text) {
+  if (!text || typeof text !== 'string') return '';
+  const urlRe = /https?:\/\/[^\s<>"']+/g;
+  let out = '';
+  let lastIndex = 0;
+  let m;
+  while ((m = urlRe.exec(text)) !== null) {
+    const start = m.index;
+    const end = urlRe.lastIndex;
+    out += window.escapeHtml(text.slice(lastIndex, start));
+    let url = m[0];
+    // Trim common trailing punctuation not typically part of the URL
+    let trailing = '';
+    while (/[.,);:\]]$/.test(url)) { trailing = url.slice(-1) + trailing; url = url.slice(0, -1); }
+    const hrefAttr = url.replace(/"/g, '&quot;');
+    out += `<a href="${hrefAttr}" target="_blank" rel="noopener noreferrer">${window.escapeHtml(url)}</a>`;
+    if (trailing) out += window.escapeHtml(trailing);
+    lastIndex = end;
+  }
+  out += window.escapeHtml(text.slice(lastIndex));
+  return out.replace(/\n/g, '<br/>');
+};
+
+// Ensure anchors inside a container open safely in a new tab
+window.setSafeLinks = function (container) {
+  if (!container) return;
+  const anchors = container.querySelectorAll('a');
+  anchors.forEach(a => {
+    const href = a.getAttribute('href');
+    if (!href) return;
+    a.setAttribute('target', '_blank');
+    a.setAttribute('rel', 'noopener noreferrer');
+  });
+};
+

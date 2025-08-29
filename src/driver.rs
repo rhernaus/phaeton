@@ -118,6 +118,9 @@ pub struct AlfenDriver {
 
     // Last computed PV excess power
     last_excess_pv_power_w: f32,
+
+    /// Per-step timings for the last completed poll cycle
+    last_poll_steps: Option<crate::driver::types::PollStepDurations>,
 }
 
 impl AlfenDriver {

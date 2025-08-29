@@ -452,6 +452,7 @@ mod tests {
             excess_pv_power_w: 0.0,
             modbus_connected: Some(true),
             driver_state: "Running".to_string(),
+            poll_steps_ms: None,
         };
 
         svc.export_typed_snapshot(&snap).await.unwrap();

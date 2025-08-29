@@ -129,6 +129,7 @@ impl super::AlfenDriver {
             excess_pv_power_w: 0.0,
             modbus_connected: None,
             driver_state: "Initializing".to_string(),
+            poll_steps_ms: None,
         });
         let (status_snapshot_tx, status_snapshot_rx) =
             watch::channel::<Arc<DriverSnapshot>>(initial_snapshot);
@@ -178,6 +179,7 @@ impl super::AlfenDriver {
             total_polls: 0,
             overrun_count: 0,
             last_excess_pv_power_w: 0.0,
+            last_poll_steps: None,
         })
     }
 
