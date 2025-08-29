@@ -244,6 +244,15 @@
 
                     <!-- Configuration Form -->
                     <div class="config-form-container">
+                        <div class="config-toolbar">
+                            <div>
+                                <button id="expand_all" class="text-btn" title="Expand all sections">Expand all</button>
+                                <button id="collapse_all" class="text-btn" title="Collapse all sections">Collapse all</button>
+                            </div>
+                            <div style="flex:1; display:flex; justify-content:flex-end;">
+                                <input id="config_search" type="search" class="config-search" placeholder="Search settings..." aria-label="Search settings" />
+                            </div>
+                        </div>
                         <div id="config_form" class="config-form-modern"></div>
                         <div class="config-actions-bottom">
                             <button id="save_config" class="save-btn-modern">

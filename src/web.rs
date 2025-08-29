@@ -1,5 +1,4 @@
 //! Axum-based HTTP server with OpenAPI (utoipa) and Swagger UI
-
 use crate::driver::{AlfenDriver, DriverSnapshot};
 #[cfg(feature = "tibber")]
 use crate::tibber;
@@ -17,7 +16,6 @@ use serde::Deserialize;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use tokio::sync::{Mutex, watch};
-// no timeouts needed in current web handlers
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::WatchStream;
@@ -65,9 +63,7 @@ async fn health() -> impl IntoResponse {
     (StatusCode::OK, "ok")
 }
 
-#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/metrics", responses(
-    (status = 200, description = "Driver metrics")
-)))]
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/metrics", responses((status = 200))))]
 async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
     let snap = state.snapshot_rx.borrow().clone();
     // Compute age_ms from timestamp
@@ -391,6 +387,7 @@ async fn update_apply(
     State(state): State<AppState>,
     Json(body): Json<ApplyBody>,
 ) -> impl IntoResponse {
+    let logger = crate::logging::get_logger("web");
     let (repo, include_prereleases) = {
         let drv = state.driver.lock().await;
         let cfg = drv.config();
@@ -403,6 +400,11 @@ async fn update_apply(
     };
     let mut updater = crate::updater::GitUpdater::new(repo, "main".to_string());
     let tag = body.version;
+    if let Some(ref t) = tag {
+        logger.info(&format!("Update apply requested for tag {}", t));
+    } else {
+        logger.info("Update apply requested for latest suitable release");
+    }
     let res = if tag.is_some() {
         updater
             .apply_release_with_prereleases(tag, include_prereleases)
@@ -417,10 +419,10 @@ async fn update_apply(
             StatusCode::OK,
             Json(serde_json::json!({"ok": true, "restarting": true})),
         ),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"ok": false, "error": e.to_string()})),
-        ),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, {
+            logger.error(&format!("Update apply failed: {}", e));
+            Json(serde_json::json!({"ok": false, "error": e.to_string()}))
+        }),
     }
 }
 

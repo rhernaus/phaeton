@@ -72,14 +72,33 @@ pub fn build_ui_schema() -> Value {
                 "static_rate_eur_per_kwh": {"type": "number", "min": 0.0, "step": 0.001, "title": "Static rate (EUR/kWh)"},
                 "currency_symbol": {"type": "string", "title": "Currency symbol"}
             }},
-            "schedule": {"title": "Schedules", "type": "list", "item": {"type": "object", "fields": {
-                "active": {"type": "boolean", "title": "Active"},
-                "days": {"type": "array", "items": {"type": "integer", "min": 0, "max": 6}, "ui": "days", "title": "Days"},
-                "start_time": {"type": "time", "title": "Start time"},
-                "end_time": {"type": "time", "title": "End time"}
-            }}},
-            "registers": {"title": "Registers (advanced)", "type": "object", "advanced": true, "fields": {
-                "station_max_current": {"type": "integer", "min": 0, "title": "Station max current (reg 1100)"}
+            "schedule": {"title": "Schedules", "type": "object", "fields": {
+                "mode": {"type": "enum", "values": ["time", "tibber"], "title": "Scheduling mode"},
+                "items": {"type": "list", "item": {"type": "object", "fields": {
+                    "active": {"type": "boolean", "title": "Active"},
+                    "days": {"type": "array", "items": {"type": "integer", "min": 0, "max": 6}, "ui": "days", "title": "Days"},
+                    "start_time": {"type": "time", "title": "Start time"},
+                    "end_time": {"type": "time", "title": "End time"}
+                }}}
+            }},
+            "registers": {"title": "Registers", "type": "object", "fields": {
+                "voltages": {"type": "integer", "min": 0, "title": "Voltages base register"},
+                "currents": {"type": "integer", "min": 0, "title": "Currents base register"},
+                "power": {"type": "integer", "min": 0, "title": "Power register"},
+                "energy": {"type": "integer", "min": 0, "title": "Energy register"},
+                "status": {"type": "integer", "min": 0, "title": "Status string register"},
+                "amps_config": {"type": "integer", "min": 0, "title": "Amps config register"},
+                "phases": {"type": "integer", "min": 0, "title": "Phases register"},
+                "firmware_version": {"type": "integer", "min": 0, "title": "Firmware version register"},
+                "firmware_version_count": {"type": "integer", "min": 0, "title": "Firmware version count"},
+                "station_serial": {"type": "integer", "min": 0, "title": "Station serial register"},
+                "station_serial_count": {"type": "integer", "min": 0, "title": "Station serial count"},
+                "manufacturer": {"type": "integer", "min": 0, "title": "Manufacturer register"},
+                "manufacturer_count": {"type": "integer", "min": 0, "title": "Manufacturer count"},
+                "platform_type": {"type": "integer", "min": 0, "title": "Platform type register"},
+                "platform_type_count": {"type": "integer", "min": 0, "title": "Platform type count"},
+                "station_max_current": {"type": "integer", "min": 0, "title": "Station max current (reg 1100)"},
+                "station_status": {"type": "integer", "min": 0, "title": "Station status register"}
             }},
             "web": {"title": "Web UI", "type": "object", "fields": {
                 "host": {"type": "string", "title": "Bind address"},

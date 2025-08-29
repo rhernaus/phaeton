@@ -421,3 +421,54 @@ async fn insufficient_solar_grace_timer_starts_and_expires() {
         "timer should be cleared when PV sufficient"
     );
 }
+
+#[tokio::test]
+async fn grace_timer_does_not_restart_without_pv_improvement_after_expiry() {
+    let (tx, rx) = mpsc::unbounded_channel();
+    let mut d = crate::driver::AlfenDriver::new(rx, tx).await.unwrap();
+
+    // Auto mode, charging enabled
+    d.current_mode = crate::controls::ChargingMode::Auto;
+    d.start_stop = crate::controls::StartStopState::Enabled;
+
+    // Configure EVSE min current and short grace period
+    let mut cfg = d.config().clone();
+    cfg.controls.min_set_current = 6.0;
+    cfg.controls.min_charge_duration_seconds = 2;
+    d.update_config(cfg).unwrap();
+
+    // Assume we have been charging at >= min current
+    d.last_sent_current = 6.0;
+
+    // No PV available -> base effective would be 0.0, timer should start and hold at min
+    let (eff1, _soc1) = d.compute_effective_current_with_soc(0.0, 0.0, 0.0).await;
+    assert!((eff1 - 6.0).abs() < 0.01, "expected hold at min current");
+    assert!(d.min_charge_timer_deadline.is_some(), "timer should be set");
+
+    // Expire the timer
+    d.min_charge_timer_deadline =
+        Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+
+    // Recompute with still no PV -> should allow stop and clear timer
+    let (eff2, _soc2) = d.compute_effective_current_with_soc(0.0, 0.0, 0.0).await;
+    assert!(eff2 <= 0.01, "expected stop after expiry");
+    assert!(
+        d.min_charge_timer_deadline.is_none(),
+        "timer should be cleared after expiry"
+    );
+
+    // Simulate immediate write to 0 A (as poll_cycle would do), which updates monotonic timestamp
+    d.last_sent_current = 0.0;
+    d.last_set_current_monotonic = std::time::Instant::now();
+
+    // Still no PV improvement: the timer must NOT restart; effective stays 0.0
+    let (eff3, _soc3) = d.compute_effective_current_with_soc(0.0, 0.0, 0.0).await;
+    assert!(
+        eff3 <= 0.01,
+        "effective should remain 0 A without PV improvement"
+    );
+    assert!(
+        d.min_charge_timer_deadline.is_none(),
+        "timer must not restart without PV improvement"
+    );
+}

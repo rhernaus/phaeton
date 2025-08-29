@@ -357,11 +357,13 @@ impl super::AlfenDriver {
 
         let min_current = self.config.controls.min_set_current.max(0.0);
         let now = std::time::Instant::now();
-        let recently_set =
-            self.last_set_current_monotonic.elapsed() < std::time::Duration::from_secs(10);
         let was_charging = self.last_sent_current >= (min_current - 0.05);
 
-        if *effective < min_current && (was_charging || recently_set) {
+        // Only start (or keep) the grace timer if we were previously charging
+        // at or above the EVSE minimum current and PV has now become
+        // insufficient. Do not restart the timer purely because we
+        // recently updated the setpoint (e.g., after expiry to 0 A).
+        if *effective < min_current && was_charging {
             match self.min_charge_timer_deadline {
                 None => {
                     // Start the grace timer
