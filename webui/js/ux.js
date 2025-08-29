@@ -141,9 +141,12 @@ window.initUX = function () {
 
 // Logs stream
 window.logsEventSource = null; window.logsPaused = false;
-window.appendLogLine = function (line) { const el = $('logs_pre'); if (!el) return; el.textContent += (el.textContent ? '\n' : '') + line; if (!logsPaused) el.scrollTop = el.scrollHeight; };
+window.appendLogLine = function (line) { const el = $('logs_pre'); if (!el) return; const html = window.ansiToHtml ? window.ansiToHtml(line) : line; const needNL = el.innerHTML && !el.innerHTML.endsWith('\n'); el.innerHTML += (needNL ? '\n' : '') + html + '\n'; if (!logsPaused) el.scrollTop = el.scrollHeight; };
 window.ensureLogsStream = function () {
   if (logsEventSource) return; const pauseChk = $('logs_pause'); if (pauseChk) pauseChk.addEventListener('change', () => { logsPaused = !!pauseChk.checked; }); const clearBtn = $('btn_clear_logs'); if (clearBtn) clearBtn.addEventListener('click', () => { const el = $('logs_pre'); if (el) el.textContent = ''; });
+  const levelSel = $('logs_level'); if (levelSel) { levelSel.addEventListener('change', () => { fetch(`/api/logs/web_level?level=${encodeURIComponent(levelSel.value)}`, { method: 'POST' }).catch(() => {}); }); (async () => { try { const res = await fetch('/api/logs/web_level'); const js = await res.json(); if (js && js.level) { const lvl = String(js.level).toUpperCase(); if ([...levelSel.options].some(o => o.value === lvl)) levelSel.value = lvl; } } catch (e) {} })(); }
+  // Load tail on open (fire and forget)
+  (async () => { try { const r = await fetch('/api/logs/tail?lines=200'); const txt = await r.text(); if (txt) { txt.split(/\r?\n/).forEach(line => { if (line) appendLogLine(line); }); } } catch (e) {} })();
   try { logsEventSource = new EventSource('/api/logs/stream');
     // Default handler (unnamed events)
     logsEventSource.onmessage = ev => { if (typeof ev.data === 'string') appendLogLine(ev.data); };

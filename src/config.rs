@@ -149,6 +149,18 @@ pub struct LoggingConfig {
     /// Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
     pub level: String,
 
+    /// Optional override for console output level (defaults to `level`)
+    #[serde(default)]
+    pub console_level: Option<String>,
+
+    /// Optional override for file output level (defaults to `level`)
+    #[serde(default)]
+    pub file_level: Option<String>,
+
+    /// Optional override for web/SSE output level (defaults to `level`)
+    #[serde(default)]
+    pub web_level: Option<String>,
+
     /// Path to log file
     pub file: String,
 
@@ -385,6 +397,9 @@ impl Default for LoggingConfig {
     fn default() -> Self {
         Self {
             level: "INFO".to_string(),
+            console_level: None,
+            file_level: None,
+            web_level: None,
             file: "/tmp/phaeton.log".to_string(),
             format: "structured".to_string(),
             max_file_size_mb: 10,

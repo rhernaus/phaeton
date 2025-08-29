@@ -66,18 +66,8 @@ async fn health() -> impl IntoResponse {
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/metrics", responses((status = 200))))]
 async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
     let snap = state.snapshot_rx.borrow().clone();
-    // Compute age_ms from timestamp
-    let age_ms = chrono::DateTime::parse_from_rfc3339(&snap.timestamp)
-        .ok()
-        .and_then(|ts| {
-            chrono::Utc::now()
-                .signed_duration_since(ts.with_timezone(&chrono::Utc))
-                .to_std()
-                .ok()
-        })
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
-    let body = serde_json::json!({
+    let age_ms = chrono::DateTime::parse_from_rfc3339(&snap.timestamp).ok().and_then(|ts| chrono::Utc::now().signed_duration_since(ts.with_timezone(&chrono::Utc)).to_std().ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
+    Json(serde_json::json!({
         "age_ms": age_ms,
         "poll_duration_ms": snap.poll_duration_ms,
         "total_polls": snap.total_polls,
@@ -85,8 +75,7 @@ async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
         "poll_interval_ms": snap.poll_interval_ms,
         "modbus_connected": snap.modbus_connected,
         "driver_state": snap.driver_state,
-    });
-    Json(body)
+    }))
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/status", responses(
@@ -293,10 +282,8 @@ async fn logs_head(
 async fn logs_stream() -> impl IntoResponse {
     let rx = crate::logging::subscribe_log_lines();
     let stream = BroadcastStream::new(rx).filter_map(|res| match res {
-        Ok(line) => Some(Ok::<Event, std::convert::Infallible>(
-            Event::default().event("log").data(line),
-        )),
-        Err(_) => None,
+        Ok(line) if crate::logging::should_emit_to_web(&line) => Some(Ok::<Event, std::convert::Infallible>(Event::default().event("log").data(line))),
+        _ => None,
     });
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
@@ -319,6 +306,18 @@ async fn logs_download(State(state): State<AppState>) -> impl IntoResponse {
         Err(_) => (StatusCode::NOT_FOUND, "Log file not available").into_response(),
     }
 }
+
+#[derive(Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema, utoipa::IntoParams))]
+struct WebLevelQuery {
+    level: String,
+}
+
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/logs/web_level", params(WebLevelQuery), responses((status = 200))))]
+async fn set_web_log_level(Query(q): Query<WebLevelQuery>) -> impl IntoResponse { match crate::logging::set_web_log_level_str(&q.level) { Ok(_) => (StatusCode::OK, Json(serde_json::json!({"ok": true, "level": q.level}))), Err(e) => (StatusCode::BAD_REQUEST, Json(serde_json::json!({"ok": false, "error": e.to_string()}))), } }
+
+#[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/logs/web_level", responses((status = 200))))]
+async fn get_web_log_level() -> impl IntoResponse { let lvl = crate::logging::get_web_log_level(); let level_str = format!("{:?}", lvl); Json(serde_json::json!({"level": level_str})) }
 
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/sessions", responses((status = 200))))]
 async fn sessions(State(state): State<AppState>) -> impl IntoResponse {
@@ -387,7 +386,6 @@ async fn update_apply(
     State(state): State<AppState>,
     Json(body): Json<ApplyBody>,
 ) -> impl IntoResponse {
-    let logger = crate::logging::get_logger("web");
     let (repo, include_prereleases) = {
         let drv = state.driver.lock().await;
         let cfg = drv.config();
@@ -400,11 +398,6 @@ async fn update_apply(
     };
     let mut updater = crate::updater::GitUpdater::new(repo, "main".to_string());
     let tag = body.version;
-    if let Some(ref t) = tag {
-        logger.info(&format!("Update apply requested for tag {}", t));
-    } else {
-        logger.info("Update apply requested for latest suitable release");
-    }
     let res = if tag.is_some() {
         updater
             .apply_release_with_prereleases(tag, include_prereleases)
@@ -419,10 +412,7 @@ async fn update_apply(
             StatusCode::OK,
             Json(serde_json::json!({"ok": true, "restarting": true})),
         ),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, {
-            logger.error(&format!("Update apply failed: {}", e));
-            Json(serde_json::json!({"ok": false, "error": e.to_string()}))
-        }),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"ok": false, "error": e.to_string()}))),
     }
 }
 
@@ -529,6 +519,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/logs/head", get(logs_head))
         .route("/api/logs/download", get(logs_download))
         .route("/api/logs/stream", get(logs_stream))
+        .route(
+            "/api/logs/web_level",
+            post(set_web_log_level).get(get_web_log_level),
+        )
         .route("/api/sessions", get(sessions))
         .route("/api/dbus", get(dbus_dump))
         .route("/api/update/status", get(update_status))
