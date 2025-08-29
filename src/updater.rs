@@ -331,6 +331,14 @@ impl GitUpdater {
     }
 
     async fn download_to_temp(client: &reqwest::Client, url: &str) -> Result<PathBuf> {
+        // Prefer staging next to the running executable to avoid cross-device rename issues
+        // common on embedded systems (e.g. /tmp vs /data).
+        let logger = get_logger("updater");
+        let staging_dir = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+            .unwrap_or(std::env::temp_dir());
+
         let mut resp = client.get(url).send().await?;
         if !resp.status().is_success() {
             return Err(PhaetonError::update(format!(
@@ -338,13 +346,22 @@ impl GitUpdater {
                 resp.status()
             )));
         }
-        let mut path = std::env::temp_dir();
-        path.push(format!("phaeton-download-{}", std::process::id()));
+
+        let mut path = staging_dir.clone();
+        let filename = format!("phaeton-download-{}", std::process::id());
+        path.push(&filename);
+        logger.debug(&format!(
+            "Downloading update to staging file: {}",
+            path.display()
+        ));
+
         let mut file = std::fs::File::create(&path)?;
         while let Some(chunk) = resp.chunk().await? {
             use std::io::Write;
             file.write_all(&chunk)?;
         }
+        // Ensure data hits the disk before replacement attempt
+        let _ = file.sync_all();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -356,12 +373,60 @@ impl GitUpdater {
     }
 
     fn replace_current_executable(tmp_path: &Path) -> Result<()> {
+        let logger = get_logger("updater");
         let current = std::env::current_exe().map_err(|e| PhaetonError::update(e.to_string()))?;
         let backup = current.with_extension("old");
-        // Best-effort backup
+        logger.info(&format!(
+            "Applying update: current={}, staging={}, backup={}",
+            current.display(),
+            tmp_path.display(),
+            backup.display()
+        ));
+
+        // Best-effort backup of current executable
         let _ = std::fs::rename(&current, &backup);
-        std::fs::rename(tmp_path, &current)?;
-        Ok(())
+
+        match std::fs::rename(tmp_path, &current) {
+            Ok(_) => {
+                logger.info("Update applied via atomic rename");
+                Ok(())
+            }
+            Err(err) => {
+                // Handle cross-device link (EXDEV) by falling back to copy + fsync
+                logger.warn(&format!(
+                    "Primary rename failed: {}. Falling back to copy.",
+                    err
+                ));
+                let copy_res = (|| {
+                    let mut from = std::fs::File::open(tmp_path)?;
+                    let mut to = std::fs::File::create(&current)?;
+                    std::io::copy(&mut from, &mut to)?;
+                    let _ = to.sync_all();
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        let mut perms = to.metadata()?.permissions();
+                        perms.set_mode(0o755);
+                        std::fs::set_permissions(&current, perms)?;
+                    }
+                    Ok::<(), std::io::Error>(())
+                })();
+
+                if let Err(copy_err) = copy_res {
+                    // Try to restore backup to minimize downtime
+                    let _ = std::fs::rename(&backup, &current);
+                    return Err(PhaetonError::update(format!(
+                        "Failed to apply update: {}; copy fallback failed: {}",
+                        err, copy_err
+                    )));
+                }
+
+                logger.info("Update applied via copy fallback");
+                // Best-effort cleanup of staging file
+                let _ = std::fs::remove_file(tmp_path);
+                Ok(())
+            }
+        }
     }
 
     fn restart_after_delay(delay: Duration) {
