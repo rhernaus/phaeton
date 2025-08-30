@@ -1,6 +1,6 @@
 # Phaeton - EV Charger Driver
 
-A high-performance EV charger driver for Victron Venus OS, providing seamless integration with Victron's D-Bus system and advanced features like dynamic pricing (feature-gated), vehicle integration (planned), and self-updates (stubbed).
+A high-performance EV charger driver for Victron Venus OS, providing seamless integration with Victron's D-Bus system and advanced features like dynamic pricing (feature-gated, experimental), vehicle integration (planned), and self-updates.
 
 ## Features
 
@@ -25,14 +25,12 @@ A high-performance EV charger driver for Victron Venus OS, providing seamless in
   - Manual, Auto (PV‑aware), and Scheduled modes
   - Auto‑mode grace only after already charging (dips clamp to 6A temporarily; initial Auto waits for sun)
   - Per‑phase power fallback (V×I) when charger reports 0
-- **Configuration**: YAML configuration with validation; schema exposed at `/api/config/schema`
-- **Logging**: Structured logging with rotation; human‑readable names in `/Status` and mode change logs
+- **Configuration**: YAML configuration with validation; schema exposed at `/api/config/schema`; discovery: `./phaeton_config.yaml`, `/data/phaeton_config.yaml`, `/etc/phaeton/config.yaml`
+- **Logging**: Structured logging with rotation; human‑readable names in `/Status` and mode change logs; web log level endpoints at `/api/logs/web_level`
 
 ### Planned / In progress
 
-- **Dynamic Pricing (Tibber)**: Implemented behind `tibber` feature; GraphQL pricing, caching, strategies (experimental)
 - **Vehicle Integration**: Tesla and Kia clients
-- **Self-Updates**: Release-based update check/apply
 - **D‑Bus**: Export full object tree (org.freedesktop.DBus.Properties) for complete Venus OS parity
 - **Security**: Authentication/authorization and rate limiting for the web API
 - **Metrics**: Prometheus exporter
@@ -154,7 +152,7 @@ cd phaeton
 cargo build --release
 
 # Run the driver (spawns web server at 127.0.0.1:8088)
-cargo run
+cargo run --all-features
 ```
 
 ### Configuration
@@ -176,8 +174,8 @@ When built with the `openapi` feature, you can retrieve the JSON schema via the 
 
 ### Feature flags
 
-- Default: `web`, `dbus`
-- Optional: `openapi` (serve `/openapi.json` and `/docs`), `tibber` (enable Tibber), `compression` (gzip/br), `full` (all)
+- Default features: `web`, `dbus`, `updater`
+- Optional: `openapi` (serve `/openapi.json` and `/docs`), `tibber` (enable Tibber), `compression` (gzip/br), `full` (web, dbus, openapi, tibber, compression)
 
 ```bash
 # Run with OpenAPI and Tibber enabled
@@ -190,11 +188,8 @@ cargo build --release --features openapi
 ### Development
 
 ```bash
-# Common tasks
-cargo test
-cargo clippy
-cargo fmt --check
-cargo audit
+# Pre-commit workflow
+cargo fmt --all && ./scripts/check-budgets.sh && cargo clippy --all-targets --all-features -- -D warnings -W clippy::cognitive_complexity && cargo test --all --locked --verbose && cargo audit --deny warnings && cargo llvm-cov --workspace --all-features --fail-under-lines 56 && cargo build --release --locked --verbose --all-features
 ```
 
 #### Developing on macOS/Linux with remote D-Bus (Cerbo GX)
@@ -235,7 +230,7 @@ cargo build --release
 
 #### GitHub Actions CI
 
-Tagging a version (e.g., `v0.1.0`) triggers a release build that uploads signed artifacts and checksums to [Releases](https://github.com/rhernaus/phaeton/releases). Pushes to `main` update the rolling `nightly` prerelease. CI workflows live under `.github/workflows/` and cover testing, linting, security audit, cross-compilation, and release publishing.
+Tagging a version (e.g., `v0.14.0`) triggers a release build that uploads artifacts and checksums to Releases. Pushes to `main` update the rolling `nightly` prerelease. Workflows live under `.github/workflows/ci.yml`, `.github/workflows/nightly.yml`, and `.github/workflows/release.yml` and cover testing, linting, coverage, security audit, cross-compilation, packaging, and publishing.
 
 #### Manual Cross-Compilation
 
@@ -280,9 +275,9 @@ cargo build --target x86_64-unknown-linux-gnu --release
 ### CI/CD
 
 - Workflows are defined in `.github/workflows/`.
-- On pull requests and pushes: run tests, clippy, fmt check, and `cargo audit`.
-- On tag (e.g., `v0.x.y`): build cross-compiled artifacts (ARMv7, AArch64, x86_64), generate `SHA256SUMS`, and publish to Releases.
-- Nightly prerelease is updated from `main`.
+- CI (`ci.yml`): fmt, clippy (all features), coverage via `cargo llvm-cov`, docs, budgets, audit, and a cross-compilation verification build.
+- Nightly (`nightly.yml`): cross-builds all targets with `--all-features`, packages tarballs, updates the `nightly` prerelease with `SHA256SUMS`.
+- Release (`release.yml`): on tag, cross-builds all targets with `--all-features`, packages tarballs with `webui/` and sample config, publishes to Releases with `SHA256SUMS`.
 
 ## Architecture
 
@@ -311,17 +306,21 @@ The application follows a modular architecture with clear separation of concerns
 - `POST /api/mode` - Change charging mode
 - `POST /api/startstop` - Start/stop charging
 - `POST /api/set_current` - Set charging current
-- `GET /api/config` - Get configuration
-- `PUT /api/config` - Update configuration
+- `POST /api/phases` - Set desired phases (1 or 3)
+- `GET /api/tibber/plan` - Tibber charge plan (feature `tibber`)
+- `GET /api/config` - Get configuration (omits vehicles)
+- `PUT /api/config` - Update configuration and attempt to persist to `/data` or working dir
 - `GET /api/config/schema` - Configuration schema
 - `GET /api/logs/head` - Head of log
 - `GET /api/logs/tail` - Tail of log
 - `GET /api/logs/download` - Download full log
+- `POST /api/logs/web_level` / `GET /api/logs/web_level` - Adjust/query web log level
 - `GET /api/sessions` - Sessions snapshot
 - `GET /api/dbus` - Cached D‑Bus values
 - `GET /api/update/status` - Update status
 - `POST /api/update/check` - Check for updates
-- `POST /api/update/apply` - Apply updates
+- `POST /api/update/apply` - Apply updates (optionally a specific tag)
+- `GET /api/update/releases` - List releases
 - `GET /api/events` - Server-Sent Events (live status)
 
 ### OpenAPI / Swagger
@@ -338,7 +337,7 @@ The application follows a modular architecture with clear separation of concerns
 
 - The HTTP API currently has no authentication and enables permissive CORS for development.
 - Deploy behind a trusted network or reverse proxy that enforces authentication.
-- Log file path defaults to `/var/log/phaeton.log`; ensure appropriate permissions.
+- Log file path is configurable (default `/tmp/phaeton.log`); ensure appropriate permissions.
 
 ### Known limitations
 
@@ -406,7 +405,7 @@ You can also fetch a human-readable hourly overview via the web logs or by wirin
    scp target/armv7-unknown-linux-gnueabihf/release/phaeton root@venus:/data/phaeton
    ```
 
-3. Set up as service (similar to Python version)
+3. Set up as service (via `/data/rc.local` as shown above)
 
 ### Docker
 
