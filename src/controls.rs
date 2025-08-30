@@ -274,13 +274,16 @@ mod tests {
             timezone: "UTC".to_string(),
             ..crate::config::Config::default()
         };
-        // Build a schedule item that is active for the current weekday and minute
+        // Build a schedule item that covers [now, now+1min), handling hour wrap correctly
         let now = Utc::now();
         let weekday = now.weekday().num_days_from_monday() as u8;
-        let start_min = now.minute().saturating_sub(1);
-        let end_min = (now.minute() + 1).min(59);
-        let start = format!("{:02}:{:02}", now.hour(), start_min);
-        let end = format!("{:02}:{:02}", now.hour(), end_min);
+        let start_h = now.hour();
+        let start_m = now.minute();
+        let next = now + chrono::Duration::minutes(1);
+        let end_h = next.hour();
+        let end_m = next.minute();
+        let start = format!("{:02}:{:02}", start_h, start_m);
+        let end = format!("{:02}:{:02}", end_h, end_m);
         cfg.schedule.items.push(crate::config::ScheduleItem {
             active: true,
             days: vec![weekday],
