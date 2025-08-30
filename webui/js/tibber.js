@@ -162,7 +162,10 @@
       const p = points[nearestIdx];
       const price = Number(p.total) || 0;
       const dt = new Date(p.starts_at);
-      const label = `${dt.toLocaleString()} — ${price.toFixed(4)} €/kWh${p.will_charge ? ' · planned' : ''}`;
+      const levelStr = p.level != null ? String(p.level).trim() : '';
+      const levelText = levelStr ? ` · ${levelStr}` : '';
+      const planText = p.will_charge ? ' · planned' : '';
+      const label = `${dt.toLocaleString()} — ${price.toFixed(4)} €/kWh${levelText}${planText}`;
       tooltip.textContent = label;
       const parent = canvas.parentElement; const parentRect = parent ? parent.getBoundingClientRect() : rect;
       const Wcss = rect.width; const scale = Wcss / W; const cssX2 = nearestX * scale + (rect.left - parentRect.left); const top = rect.top - parentRect.top + 12;
