@@ -13,6 +13,33 @@ pub enum DriverState {
     ShuttingDown,
 }
 
+/// Per-step timings of a single poll cycle in milliseconds
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PollStepDurations {
+    /// Modbus read: voltages triplet
+    pub read_voltages_ms: Option<u64>,
+    /// Modbus read: currents triplet
+    pub read_currents_ms: Option<u64>,
+    /// Modbus read: powers and total power
+    pub read_powers_ms: Option<u64>,
+    /// Modbus read: energy counter
+    pub read_energy_ms: Option<u64>,
+    /// Modbus read: status string
+    pub read_status_ms: Option<u64>,
+    /// Modbus read: station max current
+    pub read_station_max_ms: Option<u64>,
+    /// D-Bus: compute PV excess (multiple reads under the hood)
+    pub pv_excess_ms: Option<u64>,
+    /// Compute effective current including SoC checks and grace logic
+    pub compute_effective_ms: Option<u64>,
+    /// Modbus write to apply current (only when performed)
+    pub write_current_ms: Option<u64>,
+    /// Finalize cycle (session update, persist, logs, SSE status)
+    pub finalize_cycle_ms: Option<u64>,
+    /// Build snapshot and broadcast to watchers
+    pub snapshot_build_ms: Option<u64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DriverSnapshot {
     pub timestamp: String,
@@ -51,6 +78,8 @@ pub struct DriverSnapshot {
     pub modbus_connected: Option<bool>,
     /// Driver state (Initializing, Running, Error, ShuttingDown)
     pub driver_state: String,
+    /// Optional per-step timings of the last poll cycle
+    pub poll_steps_ms: Option<PollStepDurations>,
 }
 
 /// Commands accepted by the driver from external components (web, etc.)

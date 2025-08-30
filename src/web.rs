@@ -86,6 +86,7 @@ async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
         "poll_interval_ms": snap.poll_interval_ms,
         "modbus_connected": snap.modbus_connected,
         "driver_state": snap.driver_state,
+        "poll_steps_ms": snap.poll_steps_ms,
     }))
 }
 

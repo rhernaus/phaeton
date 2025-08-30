@@ -17,6 +17,10 @@ window.refreshHealth = async function () {
       setVal('st_total_polls', String(metrics.total_polls ?? '-'));
       setVal('st_overruns', String(metrics.overrun_count ?? '-'));
       const pi = metrics.poll_interval_ms; setVal('st_interval', typeof pi === 'number' ? `${pi} ms` : '-');
+      // Feed step timings history if available
+      if (metrics && metrics.poll_steps_ms) {
+        window.addPollStepHistory(metrics.poll_steps_ms);
+      }
     } else {
       setVal('st_driver', '-');
       setVal('st_modbus', 'Unknown');

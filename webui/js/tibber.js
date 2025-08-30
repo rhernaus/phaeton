@@ -8,6 +8,10 @@
 
   let points = [];
   let showOverlay = overlayToggle ? !!overlayToggle.checked : true;
+  let hoverIndex = null;
+  let lastCssW = 0; let lastCssH = 0; let lastDpr = 0;
+  let wasVisible = false;
+  let planLoadedOnce = false;
 
   function shouldShowSection() {
     const cfg = window.currentConfig || {};
@@ -16,15 +20,21 @@
   }
 
   function resizeCanvas() {
-    if (!canvas) return;
+    if (!canvas) return false;
     const dpr = window.devicePixelRatio || 1;
     const rect = canvas.getBoundingClientRect();
     const cssWidth = Math.floor(rect.width || 800);
     const cssHeight = Math.floor(rect.height || 160);
+    if (cssWidth === lastCssW && cssHeight === lastCssH && dpr === lastDpr && canvas.dataset.sized === '1') {
+      return false;
+    }
+    lastCssW = cssWidth; lastCssH = cssHeight; lastDpr = dpr;
     canvas.width = Math.max(320, cssWidth) * dpr;
     canvas.height = Math.max(120, cssHeight) * dpr;
     const ctx = canvas.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    canvas.dataset.sized = '1';
+    return true;
   }
 
   function draw() {
@@ -57,6 +67,15 @@
       ctx.beginPath(); ctx.moveTo(40, y); ctx.lineTo(W - 20, y); ctx.stroke();
     }
 
+    // Determine current time window index
+    const nowSec = Date.now() / 1000;
+    let currentIndex = null;
+    for (let i = 0; i < points.length; i++) {
+      const t0 = new Date(points[i].starts_at).getTime() / 1000;
+      const t1 = points[i].ends_at ? new Date(points[i].ends_at).getTime() / 1000 : (t0 + 3600);
+      if (nowSec >= t0 && nowSec < t1) { currentIndex = i; break; }
+    }
+
     // Bars for price per hour
     const barPad = 2;
     points.forEach((p, idx) => {
@@ -75,6 +94,24 @@
       if (showOverlay && p.will_charge) {
         ctx.fillStyle = 'rgba(16,185,129,0.25)';
         ctx.fillRect(xL, 10, w, H - 30);
+      }
+
+      // Highlight current time window (distinct color)
+      if (currentIndex === idx) {
+        ctx.fillStyle = 'rgba(234,179,8,0.16)'; // amber-400 with alpha
+        ctx.fillRect(xL, 10, w, H - 30);
+        ctx.strokeStyle = 'rgba(234,179,8,0.9)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(xL - 0.5, 10, w + 1, H - 30);
+      }
+
+      // Highlight hovered time window (overrides current)
+      if (hoverIndex === idx) {
+        ctx.fillStyle = 'rgba(59,130,246,0.18)'; // blue-500 with alpha
+        ctx.fillRect(xL, 10, w, H - 30);
+        ctx.strokeStyle = 'rgba(147,197,253,0.95)'; // blue-300
+        ctx.lineWidth = 2;
+        ctx.strokeRect(xL - 0.5, 10, w + 1, H - 30);
       }
     });
 
@@ -121,6 +158,7 @@
         const dx = Math.abs((cssX / rect.width) * W - xc);
         if (dx < bestDx) { bestDx = dx; nearestIdx = idx; nearestX = xc; }
       });
+      if (hoverIndex !== nearestIdx) { hoverIndex = nearestIdx; draw(); }
       const p = points[nearestIdx];
       const price = Number(p.total) || 0;
       const dt = new Date(p.starts_at);
@@ -130,7 +168,7 @@
       const Wcss = rect.width; const scale = Wcss / W; const cssX2 = nearestX * scale + (rect.left - parentRect.left); const top = rect.top - parentRect.top + 12;
       tooltip.style.left = `${cssX2}px`; tooltip.style.top = `${top}px`; tooltip.style.display = '';
     });
-    canvas.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
+    canvas.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; if (hoverIndex !== null) { hoverIndex = null; draw(); } });
   }
 
   async function fetchPlan() {
@@ -151,20 +189,28 @@
     if (!section) return;
     const visible = shouldShowSection();
     section.style.display = visible ? '' : 'none';
-    if (visible) { resizeCanvas(); fetchPlan(); }
+    if (visible) {
+      const resized = resizeCanvas();
+      // Fetch plan only the first time we show the section; subsequent updates use the 5-min timer
+      if (!planLoadedOnce) { planLoadedOnce = true; fetchPlan(); }
+      else if ((resized || !wasVisible) && points.length) { draw(); }
+    }
+    wasVisible = visible;
   }
 
-  window.addEventListener('resize', () => { if (shouldShowSection()) { resizeCanvas(); draw(); } });
+  window.addEventListener('resize', () => { if (shouldShowSection()) { const resized = resizeCanvas(); if (resized) draw(); } });
   if (overlayToggle) {
     overlayToggle.addEventListener('change', () => { showOverlay = !!overlayToggle.checked; draw(); });
   }
 
-  // Refresh visibility periodically to react to config changes
+  // Refresh visibility periodically to react to config changes (no frequent fetch/draw unless needed)
   setInterval(refreshVisibility, 2000);
   // Kick off once
   setTimeout(refreshVisibility, 0);
   // Refresh plan periodically (prices rarely change)
   setInterval(() => { if (shouldShowSection()) fetchPlan(); }, 5 * 60 * 1000);
+  // Soft refresh highlight roughly every minute to keep current-window marker fresh without resize/fetch
+  setInterval(() => { if (shouldShowSection() && points.length) draw(); }, 60 * 1000);
   attachHover();
 })();
 

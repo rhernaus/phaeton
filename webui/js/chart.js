@@ -6,6 +6,13 @@ window.chartHistory = {
   hoverT: null,
 };
 
+// Poll step timings history (ms per step)
+window.stepHistory = {
+  points: [],
+  windowSec: 300,
+  maxBufferSec: 21600,
+};
+
 window.addHistoryPoint = function (s) {
   const t = Date.now() / 1000;
   const current = Number(s.ac_current || 0);
@@ -19,6 +26,20 @@ window.addHistoryPoint = function (s) {
   const cutoff = t - chartHistory.maxBufferSec;
   chartHistory.points = chartHistory.points.filter(p => p.t >= cutoff);
   window.drawChart();
+};
+
+window.addPollStepHistory = function (steps) {
+  const t = Date.now() / 1000;
+  const entry = { t };
+  // Normalize to numbers or NaN
+  const keys = [
+    'read_voltages_ms','read_currents_ms','read_powers_ms','read_energy_ms','read_status_ms','read_station_max_ms','pv_excess_ms','compute_effective_ms','write_current_ms','finalize_cycle_ms','snapshot_build_ms'
+  ];
+  keys.forEach(k => { const v = steps && steps[k]; entry[k] = (typeof v === 'number') ? v : (v && typeof v === 'string' ? Number(v) : (v ?? NaN)); });
+  stepHistory.points.push(entry);
+  const cutoff = t - stepHistory.maxBufferSec;
+  stepHistory.points = stepHistory.points.filter(p => p.t >= cutoff);
+  window.drawStepsChart();
 };
 
 window.drawDotOnChart = function (ctx, x, y, color) {
@@ -84,6 +105,48 @@ window.drawChart = function () {
     const canvasCssW = rect.width; const scale = canvasCssW / W; const cssX = x * scale + (rect.left - parentRect.left); const top = rect.top - parentRect.top + 12;
     tip.style.left = `${cssX}px`; tip.style.top = `${top}px`; tip.style.display = '';
   } else if (tip) { tip.style.display = 'none'; }
+};
+
+window.drawStepsChart = function () {
+  const canvas = $('steps_chart');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.width / dpr;
+  const H = canvas.height / dpr;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#1a2332';
+  ctx.fillRect(0, 0, W, H);
+  if (stepHistory.points.length < 2) return;
+  const tEnd = stepHistory.points[stepHistory.points.length - 1].t;
+  const tMinDesired = tEnd - stepHistory.windowSec;
+  const visible = stepHistory.points.filter(p => p.t >= tMinDesired);
+  if (visible.length < 2) return;
+  const tMin = visible[0].t; const tMax = visible[visible.length - 1].t; const tSpan = Math.max(1, tMax - tMin);
+  const keys = [
+    ['read_voltages_ms', '#60a5fa'],
+    ['read_currents_ms', '#34d399'],
+    ['read_powers_ms', '#f472b6'],
+    ['read_energy_ms', '#f59e0b'],
+    ['read_status_ms', '#eab308'],
+    ['read_station_max_ms', '#c084fc'],
+    ['pv_excess_ms', '#10b981'],
+    ['compute_effective_ms', '#f97316'],
+    ['write_current_ms', '#ef4444'],
+    ['finalize_cycle_ms', '#22d3ee'],
+    ['snapshot_build_ms', '#a3e635'],
+  ];
+  let vMax = 10; // ms
+  visible.forEach(p => keys.forEach(([k]) => { const v = Number(p[k]); if (Number.isFinite(v)) vMax = Math.max(vMax, v); }));
+  vMax = Math.ceil(vMax / 10) * 10;
+  function mapX(t) { return 40 + ((t - tMin) / tSpan) * (W - 60); }
+  function mapY(v) { return H - 20 - (v / vMax) * (H - 40); }
+  ctx.strokeStyle = 'rgba(255,255,255,0.1)'; ctx.lineWidth = 1;
+  for (let i = 0; i <= 5; i++) { const y = mapY((vMax / 5) * i); ctx.beginPath(); ctx.moveTo(40, y); ctx.lineTo(W - 20, y); ctx.stroke(); }
+  function plot(color, key) { ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.beginPath(); let started = false; visible.forEach((p) => { const v = Number(p[key]); if (!Number.isFinite(v)) return; const x = mapX(p.t); const y = mapY(v); if (!started) { ctx.moveTo(x, y); started = true; } else { ctx.lineTo(x, y); } }); ctx.stroke(); }
+  keys.forEach(([k, col]) => plot(col, k));
+  ctx.strokeStyle = 'rgba(255,255,255,0.2)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(40, 10); ctx.lineTo(40, H - 20); ctx.lineTo(W - 20, H - 20); ctx.stroke();
+  ctx.fillStyle = '#8899aa'; ctx.font = '12px -apple-system, sans-serif'; ctx.fillText(`${vMax} ms`, 4, mapY(vMax) + 4); ctx.fillText('0', 20, H - 22);
 };
 
 window.resizeChartCanvas = function () {

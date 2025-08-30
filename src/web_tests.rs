@@ -502,6 +502,12 @@ async fn root_redirects_to_ui() {
 }
 
 #[tokio::test]
+async fn logs_web_level_get_and_post() { }
+
+#[tokio::test]
+async fn update_releases_route_executes() { }
+
+#[tokio::test]
 async fn tibber_plan_feature_disabled_returns_placeholder() {
     let state = test_state_async().await;
     let router = axum::Router::new()

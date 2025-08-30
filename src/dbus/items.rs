@@ -263,6 +263,60 @@ mod tests {
             serde_json::json!(std::f64::consts::PI)
         );
     }
+
+    #[tokio::test]
+    async fn set_value_respects_writable_and_dispatches_commands() {
+        use zbus::zvariant::Value;
+
+        // Build BusItem for /Mode and mark it writable in shared state
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let root = OwnedObjectPath::try_from("/").unwrap();
+        let shared = Arc::new(Mutex::new(DbusSharedState::new(tx, root)));
+
+        // Pre-insert initial value and mark writable
+        {
+            let mut s = shared.lock().unwrap();
+            s.paths.insert("/Mode".to_string(), serde_json::json!(0));
+            s.writable.insert("/Mode".to_string());
+        }
+
+        let item = BusItem::new("/Mode".to_string(), shared.clone());
+
+        // Call set_value with a string that should normalize to 2 (Scheduled)
+        let ov = OwnedValue::try_from(Value::from("scheduled")).unwrap();
+        let rc = item.set_value(ov).await;
+        assert_eq!(rc, 0);
+
+        // Value should be updated and command dispatched
+        {
+            let s = shared.lock().unwrap();
+            assert_eq!(s.paths.get("/Mode").cloned(), Some(serde_json::json!(2)));
+        }
+        // Command sent to driver channel
+        let cmd = rx.try_recv().expect("expected driver command");
+        match cmd {
+            crate::driver::DriverCommand::SetMode(m) => assert_eq!(m, 2),
+            _ => panic!("unexpected command"),
+        }
+
+        // Now test non-writable path returns 1 and does not change value
+        let (tx2, _rx2) = mpsc::unbounded_channel();
+        let shared2 = Arc::new(Mutex::new(DbusSharedState::new(
+            tx2,
+            OwnedObjectPath::try_from("/").unwrap(),
+        )));
+        {
+            let mut s = shared2.lock().unwrap();
+            s.paths
+                .insert("/StartStop".to_string(), serde_json::json!(0));
+            // note: not marking writable
+        }
+        let item2 = BusItem::new("/StartStop".to_string(), shared2.clone());
+        let rc2 = item2.set_value(OwnedValue::from(1i64)).await;
+        assert_eq!(rc2, 1);
+        let s2 = shared2.lock().unwrap();
+        assert_eq!(s2.paths.get("/StartStop"), Some(&serde_json::json!(0)));
+    }
 }
 
 #[zbus::interface(name = "com.victronenergy.BusItem")]
