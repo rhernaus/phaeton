@@ -270,4 +270,158 @@ mod tests {
         let msg = rx_status.recv().await.unwrap();
         assert_eq!(msg, "hello");
     }
+
+    #[tokio::test]
+    async fn publish_initial_and_ensure_controls_populate_paths() {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let mut d = AlfenDriver::new(rx, tx.clone()).await.unwrap();
+
+        // Attach a D-Bus service without real connection
+        let svc = crate::dbus::DbusService::new(d.config.device_instance, tx)
+            .await
+            .unwrap();
+        let svc_arc = std::sync::Arc::new(tokio::sync::Mutex::new(svc));
+        d.dbus = Some(svc_arc.clone());
+
+        d.publish_initial_dbus_paths().await;
+        d.ensure_control_items().await;
+
+        {
+            let svc_guard = svc_arc.lock().await;
+            let shared = svc_guard.shared.lock().unwrap();
+            // Management/identity basics
+            assert!(shared.paths.contains_key("/Mgmt/ProcessName"));
+            assert!(shared.paths.contains_key("/DeviceInstance"));
+            // Controls created and writable
+            for (k, should_write) in [
+                ("/Mode".to_string(), true),
+                ("/StartStop".to_string(), true),
+                ("/SetCurrent".to_string(), true),
+                ("/Position".to_string(), true),
+                ("/AutoStart".to_string(), true),
+                ("/EnableDisplay".to_string(), true),
+            ] {
+                assert!(shared.paths.contains_key(&k), "missing path {}", k);
+                if should_write {
+                    assert!(shared.writable.contains(&k), "path {} not writable", k);
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn refresh_charger_identity_updates_driver_and_dbus() {
+        use crate::driver::modbus_like::ModbusLike;
+        use std::collections::HashMap;
+
+        struct MockModbusStrings {
+            reads: HashMap<(u8, u16, u16), Vec<u16>>,
+        }
+
+        impl MockModbusStrings {
+            fn new() -> Self { Self { reads: HashMap::new() } }
+            fn regs_from_str(s: &str, reg_count: u16) -> Vec<u16> {
+                let bytes = s.as_bytes();
+                let mut out: Vec<u16> = Vec::new();
+                let mut i = 0;
+                while i < bytes.len() {
+                    let hi = bytes[i] as u16;
+                    let lo = if i + 1 < bytes.len() { bytes[i + 1] as u16 } else { 0 };
+                    out.push((hi << 8) | lo);
+                    i += 2;
+                }
+                // Pad with zeros up to reg_count
+                while out.len() < reg_count as usize {
+                    out.push(0);
+                }
+                out
+            }
+            fn with_str(mut self, slave: u8, addr: u16, count: u16, s: &str) -> Self {
+                self.reads
+                    .insert((slave, addr, count), Self::regs_from_str(s, count));
+                self
+            }
+        }
+
+        #[async_trait::async_trait]
+        impl ModbusLike for MockModbusStrings {
+            fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+            async fn read_holding_registers(
+                &mut self,
+                slave_id: u8,
+                address: u16,
+                count: u16,
+            ) -> crate::error::Result<Vec<u16>> {
+                Ok(self
+                    .reads
+                    .get(&(slave_id, address, count))
+                    .cloned()
+                    .unwrap_or_default())
+            }
+            async fn write_multiple_registers(
+                &mut self,
+                _slave_id: u8,
+                _address: u16,
+                _values: &[u16],
+            ) -> crate::error::Result<()> {
+                Ok(())
+            }
+        }
+
+        let (tx, rx) = mpsc::unbounded_channel();
+        let mut d = AlfenDriver::new(rx, tx.clone()).await.unwrap();
+
+        // Attach D-Bus service holder
+        let svc = crate::dbus::DbusService::new(d.config.device_instance, tx)
+            .await
+            .unwrap();
+        let svc_arc = std::sync::Arc::new(tokio::sync::Mutex::new(svc));
+        d.dbus = Some(svc_arc.clone());
+
+        // Install Modbus mock with string registers
+        let cfg = d.config().clone();
+        let mock = MockModbusStrings::new()
+            .with_str(
+                cfg.modbus.station_slave_id,
+                cfg.registers.manufacturer,
+                cfg.registers.manufacturer_count,
+                "Alfen",
+            )
+            .with_str(
+                cfg.modbus.station_slave_id,
+                cfg.registers.firmware_version,
+                cfg.registers.firmware_version_count,
+                "7.2.0",
+            )
+            .with_str(
+                cfg.modbus.station_slave_id,
+                cfg.registers.station_serial,
+                cfg.registers.station_serial_count,
+                "SN123",
+            );
+        d.modbus_manager = Some(Box::new(mock));
+
+        d.refresh_charger_identity().await.unwrap();
+
+        // Driver identity updated
+        assert_eq!(d.product_name.as_deref(), Some("Alfen EV Charger"));
+        assert_eq!(d.firmware_version.as_deref(), Some("7.2.0"));
+        assert_eq!(d.serial.as_deref(), Some("SN123"));
+
+        // DBus paths updated
+        let svc_guard = svc_arc.lock().await;
+        let shared = svc_guard.shared.lock().unwrap();
+        assert_eq!(
+            shared.paths.get("/ProductName"),
+            Some(&serde_json::json!("Alfen EV Charger"))
+        );
+        assert_eq!(
+            shared.paths.get("/FirmwareVersion"),
+            Some(&serde_json::json!("7.2.0"))
+        );
+        assert_eq!(
+            shared.paths.get("/Serial"),
+            Some(&serde_json::json!("SN123"))
+        );
+    }
 }
