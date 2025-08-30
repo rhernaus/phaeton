@@ -383,17 +383,18 @@ impl super::AlfenDriver {
     ) -> (bool, bool, bool) {
         let (should_update, need_change, interval_due) = self.should_send_update(effective);
         if should_update {
+            let phase_label = if self.applied_phases >= 3 { "3P" } else { "1P" };
             if need_change {
                 let reason = self.current_mode_reason();
                 self.logger.info(&format!(
-                    "Adjusting available current: {:.2} A -> {:.2} A (reason={}, pv_excess={:.0} W, station_max={:.1} A)",
-                    self.last_sent_current, effective, reason, excess_pv_power_w, self.station_max_current
+                    "Adjusting available current: {:.2} A -> {:.2} A (reason={}, pv_excess={:.0} W, station_max={:.1} A, phases={})",
+                    self.last_sent_current, effective, reason, excess_pv_power_w, self.station_max_current, phase_label
                 ));
             } else if interval_due {
                 let reason = self.current_mode_reason();
                 self.logger.info(&format!(
-                    "Reasserting available current: {:.2} A (reason={}, pv_excess={:.0} W, station_max={:.1} A)",
-                    effective, reason, excess_pv_power_w, self.station_max_current
+                    "Reasserting available current: {:.2} A (reason={}, pv_excess={:.0} W, station_max={:.1} A, phases={})",
+                    effective, reason, excess_pv_power_w, self.station_max_current, phase_label
                 ));
             }
         }

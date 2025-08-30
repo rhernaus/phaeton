@@ -1,6 +1,74 @@
 use super::types::DriverSnapshot;
 
 impl super::AlfenDriver {
+    fn derive_phase_count_for_snapshot(&self) -> u8 {
+        if self.applied_phases >= 3 { 3 } else { 1 }
+    }
+
+    fn compute_ac_current_for_snapshot(&self) -> f64 {
+        self.last_l1_current
+            .max(self.last_l2_current.max(self.last_l3_current))
+    }
+
+    fn compute_pricing_currency_for_snapshot(&self) -> Option<String> {
+        Some(self.config().pricing.currency_symbol.clone()).filter(|sym| !sym.is_empty())
+    }
+
+    fn compute_energy_rate_for_snapshot(&self) -> Option<f64> {
+        if self.config().pricing.source.to_lowercase() == "static" {
+            Some(self.config().pricing.static_rate_eur_per_kwh)
+        } else {
+            None
+        }
+    }
+
+    fn build_session_value_for_snapshot(&self) -> serde_json::Value {
+        let mut s = serde_json::json!({});
+        // Prefer exact seconds derived from session start/end times
+        let charging_time_sec: i64 = if let Some(cur) = self.sessions.current_session.as_ref() {
+            (chrono::Utc::now() - cur.start_time).num_seconds().max(0)
+        } else if let Some(last) = self.sessions.last_session.as_ref() {
+            if let Some(end) = last.end_time {
+                (end - last.start_time).num_seconds().max(0)
+            } else {
+                0
+            }
+        } else {
+            0
+        };
+        s["charging_time_sec"] = serde_json::json!(charging_time_sec);
+        let sessions_state = self.sessions_snapshot();
+        if let Some(obj) = sessions_state.as_object() {
+            if let Some(cur) = obj.get("current_session").and_then(|v| v.as_object()) {
+                if let Some(ts) = cur.get("start_time") {
+                    s["start_ts"] = ts.clone();
+                }
+                if let Some(v) = cur.get("energy_delivered_kwh") {
+                    s["energy_delivered_kwh"] = v.clone();
+                }
+            }
+            if let Some(last) = obj.get("last_session").and_then(|v| v.as_object()) {
+                if s.get("start_ts").is_none()
+                    && let Some(ts) = last.get("start_time")
+                {
+                    s["start_ts"] = ts.clone();
+                }
+                if let Some(ts) = last.get("end_time") {
+                    s["end_ts"] = ts.clone();
+                }
+                if s.get("energy_delivered_kwh").is_none()
+                    && let Some(v) = last.get("energy_delivered_kwh")
+                {
+                    s["energy_delivered_kwh"] = v.clone();
+                }
+                if let Some(v) = last.get("cost") {
+                    s["cost"] = v.clone();
+                }
+            }
+        }
+        s
+    }
+
     pub fn subscribe_snapshot(
         &self,
     ) -> tokio::sync::watch::Receiver<std::sync::Arc<DriverSnapshot>> {
@@ -8,70 +76,12 @@ impl super::AlfenDriver {
     }
 
     pub(super) fn build_typed_snapshot(&self, poll_duration_ms: Option<u64>) -> DriverSnapshot {
-        let phase_count = [
-            self.last_l1_current,
-            self.last_l2_current,
-            self.last_l3_current,
-        ]
-        .iter()
-        .filter(|v| v.is_finite() && v.abs() > 0.01)
-        .count() as u8;
-        let ac_current = self
-            .last_l1_current
-            .max(self.last_l2_current.max(self.last_l3_current));
-        let pricing_currency =
-            Some(self.config().pricing.currency_symbol.clone()).filter(|sym| !sym.is_empty());
-        let energy_rate = if self.config().pricing.source.to_lowercase() == "static" {
-            Some(self.config().pricing.static_rate_eur_per_kwh)
-        } else {
-            None
-        };
-        let session = {
-            let mut s = serde_json::json!({});
-            // Prefer exact seconds derived from session start/end times
-            let charging_time_sec: i64 = if let Some(cur) = self.sessions.current_session.as_ref() {
-                (chrono::Utc::now() - cur.start_time).num_seconds().max(0)
-            } else if let Some(last) = self.sessions.last_session.as_ref() {
-                if let Some(end) = last.end_time {
-                    (end - last.start_time).num_seconds().max(0)
-                } else {
-                    0
-                }
-            } else {
-                0
-            };
-            s["charging_time_sec"] = serde_json::json!(charging_time_sec);
-            let sessions_state = self.sessions_snapshot();
-            if let Some(obj) = sessions_state.as_object() {
-                if let Some(cur) = obj.get("current_session").and_then(|v| v.as_object()) {
-                    if let Some(ts) = cur.get("start_time") {
-                        s["start_ts"] = ts.clone();
-                    }
-                    if let Some(v) = cur.get("energy_delivered_kwh") {
-                        s["energy_delivered_kwh"] = v.clone();
-                    }
-                }
-                if let Some(last) = obj.get("last_session").and_then(|v| v.as_object()) {
-                    if s.get("start_ts").is_none()
-                        && let Some(ts) = last.get("start_time")
-                    {
-                        s["start_ts"] = ts.clone();
-                    }
-                    if let Some(ts) = last.get("end_time") {
-                        s["end_ts"] = ts.clone();
-                    }
-                    if s.get("energy_delivered_kwh").is_none()
-                        && let Some(v) = last.get("energy_delivered_kwh")
-                    {
-                        s["energy_delivered_kwh"] = v.clone();
-                    }
-                    if let Some(v) = last.get("cost") {
-                        s["cost"] = v.clone();
-                    }
-                }
-            }
-            s
-        };
+        // Reflect configured phase count immediately and use helpers for clarity
+        let phase_count = self.derive_phase_count_for_snapshot();
+        let ac_current = self.compute_ac_current_for_snapshot();
+        let pricing_currency = self.compute_pricing_currency_for_snapshot();
+        let energy_rate = self.compute_energy_rate_for_snapshot();
+        let session = self.build_session_value_for_snapshot();
 
         DriverSnapshot {
             timestamp: chrono::Utc::now().to_rfc3339(),

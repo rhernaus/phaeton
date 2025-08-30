@@ -17,6 +17,41 @@ impl BusItem {
         Self { path, shared }
     }
 
+    fn normalize_set_current(value: &serde_json::Value) -> serde_json::Value {
+        // Accept numbers directly, parse numeric strings, otherwise fallback to 0.0
+        match value {
+            serde_json::Value::Number(n) => {
+                if let Some(f) = n.as_f64() {
+                    serde_json::json!(f)
+                } else if let Some(i) = n.as_i64() {
+                    serde_json::json!(i as f64)
+                } else if let Some(u) = n.as_u64() {
+                    serde_json::json!(u as f64)
+                } else {
+                    serde_json::json!(0.0)
+                }
+            }
+            serde_json::Value::String(s) => {
+                let trimmed = s.trim();
+                // Allow comma as decimal separator from some locales
+                let normalized = trimmed.replace(',', ".");
+                match normalized.parse::<f64>() {
+                    Ok(f) if f.is_finite() => serde_json::json!(f),
+                    _ => serde_json::json!(0.0),
+                }
+            }
+            serde_json::Value::Bool(b) => {
+                // Interpret true/false as 1.0/0.0 minimally
+                if *b {
+                    serde_json::json!(1.0)
+                } else {
+                    serde_json::json!(0.0)
+                }
+            }
+            _ => serde_json::json!(0.0),
+        }
+    }
+
     fn normalize_start_stop(value: &serde_json::Value) -> serde_json::Value {
         let v = match value {
             serde_json::Value::Bool(b) => {
@@ -88,6 +123,7 @@ impl BusItem {
         match self.path.as_str() {
             "/StartStop" => Self::normalize_start_stop(sv_local),
             "/Mode" => Self::normalize_mode(sv_local),
+            "/SetCurrent" => Self::normalize_set_current(sv_local),
             _ => sv_local.clone(),
         }
     }
@@ -121,7 +157,14 @@ impl BusItem {
                     .send(crate::driver::DriverCommand::SetStartStop(v));
             }
             "/SetCurrent" => {
-                let a = original_sv.as_f64().unwrap_or(0.0) as f32;
+                // Prefer the normalized numeric value; fall back to original if needed
+                let a_f64 = normalized_json
+                    .as_f64()
+                    .or_else(|| normalized_json.as_i64().map(|v| v as f64))
+                    .or_else(|| normalized_json.as_u64().map(|v| v as f64))
+                    .or_else(|| original_sv.as_f64())
+                    .unwrap_or(0.0);
+                let a = a_f64 as f32;
                 let _ = shared
                     .commands_tx
                     .send(crate::driver::DriverCommand::SetCurrent(a));
@@ -174,6 +217,7 @@ mod tests {
     use super::*;
     use crate::dbus::shared::DbusSharedState;
     use tokio::sync::mpsc;
+    use zbus::zvariant::Value;
 
     fn make_item(path: &str) -> BusItem {
         let (tx, _rx) = mpsc::unbounded_channel();
@@ -266,8 +310,6 @@ mod tests {
 
     #[tokio::test]
     async fn set_value_respects_writable_and_dispatches_commands() {
-        use zbus::zvariant::Value;
-
         // Build BusItem for /Mode and mark it writable in shared state
         let (tx, mut rx) = mpsc::unbounded_channel();
         let root = OwnedObjectPath::try_from("/").unwrap();
@@ -316,6 +358,54 @@ mod tests {
         assert_eq!(rc2, 1);
         let s2 = shared2.lock().unwrap();
         assert_eq!(s2.paths.get("/StartStop"), Some(&serde_json::json!(0)));
+    }
+
+    #[tokio::test]
+    async fn set_current_accepts_string_and_numbers() {
+        // Prepare BusItem for /SetCurrent
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let root = OwnedObjectPath::try_from("/").unwrap();
+        let shared = Arc::new(Mutex::new(DbusSharedState::new(tx, root)));
+
+        // Mark path as writable and seed value
+        {
+            let mut s = shared.lock().unwrap();
+            s.paths
+                .insert("/SetCurrent".to_string(), serde_json::json!(0.0));
+            s.writable.insert("/SetCurrent".to_string());
+        }
+
+        let item = BusItem::new("/SetCurrent".to_string(), shared.clone());
+
+        // 1) String with decimal point
+        let ov1 = OwnedValue::try_from(Value::from("16.5")).unwrap();
+        let rc1 = item.set_value(ov1).await;
+        assert_eq!(rc1, 0);
+        if let crate::driver::DriverCommand::SetCurrent(a) = rx.try_recv().unwrap() {
+            assert!((a - 16.5).abs() < f32::EPSILON);
+        } else {
+            panic!("expected SetCurrent for string input");
+        }
+
+        // 2) String with comma decimal separator
+        let ov2 = OwnedValue::try_from(Value::from("7,25")).unwrap();
+        let rc2 = item.set_value(ov2).await;
+        assert_eq!(rc2, 0);
+        if let crate::driver::DriverCommand::SetCurrent(a) = rx.try_recv().unwrap() {
+            assert!((a - 7.25).abs() < f32::EPSILON);
+        } else {
+            panic!("expected SetCurrent for comma-decimal string input");
+        }
+
+        // 3) Numeric integer
+        let ov3 = OwnedValue::from(10i64);
+        let rc3 = item.set_value(ov3).await;
+        assert_eq!(rc3, 0);
+        if let crate::driver::DriverCommand::SetCurrent(a) = rx.try_recv().unwrap() {
+            assert!((a - 10.0).abs() < f32::EPSILON);
+        } else {
+            panic!("expected SetCurrent for integer input");
+        }
     }
 }
 
