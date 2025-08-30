@@ -162,7 +162,7 @@
       const p = points[nearestIdx];
       const price = Number(p.total) || 0;
       const dt = new Date(p.starts_at);
-      const levelText = p.level ? ` · ${p.level}` : '';
+      const levelText = (p.level !== undefined && p.level !== null) ? ` · ${p.level}` : '';
       const planText = p.will_charge ? ' · planned' : '';
       const label = `${dt.toLocaleString()} — ${price.toFixed(4)} €/kWh${levelText}${planText}`;
       tooltip.textContent = label;
