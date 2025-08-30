@@ -5,6 +5,7 @@
   const sched = document.getElementById('mode_sched');
   const chargeBtn = document.getElementById('charge_btn');
   const slider = document.getElementById('current_slider');
+  const phasesToggle = document.getElementById('phases_toggle');
 
   function scheduleModeRevert(expectedMode) {
     window.pendingModeTimer = setTimeout(() => {
@@ -77,6 +78,19 @@
     });
     slider.addEventListener('pointerdown', () => { window.currentDirtyUntil = Date.now() + 5000; });
     slider.addEventListener('pointerup', () => { window.currentDirtyUntil = Date.now() + 1500; });
+  }
+
+  if (phasesToggle) {
+    addButtonFeedback(phasesToggle);
+    phasesToggle.addEventListener('change', async () => {
+      const phases = phasesToggle.checked ? 3 : 1;
+      try {
+        await postJSON('/api/phases', { phases });
+      } catch (_) {
+        // revert UI if failed
+        phasesToggle.checked = !phasesToggle.checked;
+      }
+    });
   }
 })();
 

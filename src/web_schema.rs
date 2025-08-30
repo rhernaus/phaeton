@@ -32,7 +32,11 @@ pub fn build_ui_schema() -> Value {
                 "current_update_interval": {"type": "integer", "min": 0, "title": "Current update interval (ms)"},
                 "verify_delay": {"type": "integer", "min": 0, "title": "Verify delay (ms)"},
                 "ev_reporting_lag_ms": {"type": "integer", "min": 0, "title": "EV reporting lag (ms)"},
-                "pv_excess_ema_alpha": {"type": "number", "min": 0.0, "max": 1.0, "step": 0.01, "title": "PV excess EMA alpha"}
+                "pv_excess_ema_alpha": {"type": "number", "min": 0.0, "max": 1.0, "step": 0.01, "title": "PV excess EMA alpha"},
+                "phase_switch_grace_seconds": {"type": "integer", "min": 0, "title": "Phase switch grace (s)"},
+                "phase_switch_settle_seconds": {"type": "integer", "min": 0, "title": "Phase switch settle (s)"},
+                "auto_phase_switch": {"type": "boolean", "title": "Auto 1P/3P switching in Auto mode"},
+                "auto_phase_hysteresis_watts": {"type": "number", "min": 0.0, "step": 1.0, "title": "Auto phase hysteresis (W)"}
             }},
             "logging": {"title": "Logging", "type": "object", "fields": {
                 "level": {"type": "enum", "values": ["DEBUG","INFO","WARNING","ERROR","CRITICAL"], "title": "Level"},

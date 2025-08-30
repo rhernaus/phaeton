@@ -32,6 +32,13 @@ window.fetchStatus = async function () {
     setTextIfExists('di', s.device_instance ?? '');
     const stName = statusNames[s.status] || '-';
     setTextIfExists('status_text', s.status === 2 ? `Charging ${Number(s.active_phases) === 1 ? '1P' : '3P'}` : stName);
+    const phasesToggle = $('phases_toggle');
+    if (phasesToggle) {
+      const mode = Number(s.mode ?? 0);
+      // Disable in Auto mode (auto switching) and reflect current phases
+      phasesToggle.disabled = mode === 1;
+      phasesToggle.checked = Number(s.active_phases || 0) >= 3;
+    }
     const p = Number(s.ac_power || 0);
     const powerEl = $('hero_power_w');
     if (powerEl) {

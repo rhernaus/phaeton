@@ -6,6 +6,7 @@ impl AlfenDriver {
             DriverCommand::SetMode(m) => self.set_mode(m).await,
             DriverCommand::SetStartStop(v) => self.set_start_stop(v).await,
             DriverCommand::SetCurrent(a) => self.set_intended_current(a).await,
+            DriverCommand::SetPhases(p) => self.set_phases(p).await,
         }
     }
 }

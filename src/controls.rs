@@ -63,6 +63,7 @@ impl ChargingControls {
         _current_time: f64,
         solar_power: Option<f32>,
         config: &crate::config::Config,
+        assumed_phases: u8,
     ) -> Result<f32> {
         if matches!(start_stop, StartStopState::Stopped) {
             return Ok(0.0);
@@ -75,7 +76,7 @@ impl ChargingControls {
                 // Convert Watts to Amps using nominal 230V per phase and assume 3 phases.
                 let excess_watts = solar_power.unwrap_or(0.0).max(0.0);
                 let nominal_voltage = 230.0f32;
-                let phases = 3.0f32; // TODO: detect active phases from charger
+                let phases = assumed_phases.clamp(1, 3) as f32;
                 let amps_raw = excess_watts / (phases * nominal_voltage);
                 // Below EVSE minimum current we should not oscillate with tiny setpoints.
                 // If below min_set_current, clamp to exactly 0.0 unless already above threshold.
@@ -139,6 +140,7 @@ impl ChargingControls {
         _current_time: f64,
         solar_power: Option<f32>,
         config: &crate::config::Config,
+        assumed_phases: u8,
     ) -> Result<f32> {
         if matches!(start_stop, StartStopState::Stopped) {
             return Ok(0.0);
@@ -148,7 +150,7 @@ impl ChargingControls {
             ChargingMode::Auto => {
                 let excess_watts = solar_power.unwrap_or(0.0).max(0.0);
                 let nominal_voltage = 230.0f32;
-                let phases = 3.0f32;
+                let phases = assumed_phases.clamp(1, 3) as f32;
                 let amps_raw = excess_watts / (phases * nominal_voltage);
                 let min_current = config.controls.min_set_current.max(0.0);
                 let amps = if amps_raw < min_current {
@@ -313,6 +315,7 @@ mod tests {
                 0.0,
                 None,
                 &cfg,
+                3,
             )
             .unwrap();
         assert!((manual - 32.0).abs() < f32::EPSILON);
@@ -327,6 +330,7 @@ mod tests {
                 0.0,
                 Some(3000.0),
                 &cfg,
+                3,
             )
             .unwrap();
         assert_eq!(auto_low, 0.0);
@@ -342,6 +346,7 @@ mod tests {
                 0.0,
                 Some(watts),
                 &cfg,
+                3,
             )
             .unwrap();
         let expected = watts / (3.0 * 230.0);
@@ -361,6 +366,7 @@ mod tests {
                 0.0,
                 None,
                 &cfg,
+                3,
             )
             .unwrap();
         assert_eq!(amps, 20.0);

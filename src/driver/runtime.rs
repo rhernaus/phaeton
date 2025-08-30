@@ -180,6 +180,11 @@ impl super::AlfenDriver {
             overrun_count: 0,
             last_excess_pv_power_w: 0.0,
             last_poll_steps: None,
+
+            desired_phases: 3,
+            applied_phases: 0,
+            last_phase_switch: None,
+            phase_settle_deadline: None,
         })
     }
 

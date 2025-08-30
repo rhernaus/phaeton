@@ -22,6 +22,7 @@ async fn manual_mode_respects_limits() {
             0.0,
             Some(0.0),
             &cfg,
+            3,
         )
         .await
         .unwrap();
@@ -41,6 +42,7 @@ async fn stopped_returns_zero() {
             0.0,
             Some(0.0),
             &cfg,
+            3,
         )
         .await
         .unwrap();
@@ -61,6 +63,7 @@ async fn auto_mode_converts_solar_power() {
             0.0,
             Some(6900.0),
             &cfg,
+            3,
         )
         .await
         .unwrap();
@@ -92,6 +95,7 @@ async fn scheduled_mode_respects_schedule() {
             0.0,
             Some(0.0),
             &cfg,
+            3,
         )
         .await
         .unwrap();
@@ -109,6 +113,7 @@ async fn scheduled_mode_respects_schedule() {
             0.0,
             Some(0.0),
             &cfg,
+            3,
         )
         .await
         .unwrap();
