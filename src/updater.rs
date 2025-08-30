@@ -135,7 +135,13 @@ impl GitUpdater {
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
                 let draft = r.get("draft").and_then(|v| v.as_bool()).unwrap_or(false);
-                if !include_prerelease && (prerelease || draft) {
+                // Allow nightly tag to appear even when prereleases are hidden
+                let tag_is_nightly = r
+                    .get("tag_name")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.eq_ignore_ascii_case("nightly"))
+                    .unwrap_or(false);
+                if !include_prerelease && (prerelease || draft) && !tag_is_nightly {
                     continue;
                 }
                 let tag = r
