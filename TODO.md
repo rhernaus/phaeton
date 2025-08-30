@@ -8,8 +8,8 @@ This project is an EV charger driver, providing a performant, memory-safe, and m
 - **Phase**: Foundation setup (Phase 1) - **COMPLETED** ✅
 - **Edition**: Migrated to Rust 2024 ✅
 - **Code Quality**: Clippy clean; unit tests present for core modules ✅
-- **Build/cross**: Cross-compilation scaffolding present for ARMv7 and AArch64 ✅
-- **CI/CD**: GitHub Actions implemented (see `.github/workflows/`) ✅
+- **Build/cross**: Cross-compilation for ARMv7, AArch64, and x86_64 ✅
+- **CI/CD**: Workflows `ci.yml`, `nightly.yml`, and `release.yml` configured ✅
 - **Dependencies**: `tokio-modbus` at 0.16.1; nested Result handling adopted ✅
 
 ## Project Structure
@@ -87,31 +87,23 @@ phaeton/
 
 ---
 
-# Phase 2: Core Communication & Control (Priority: High) ✅ MOSTLY COMPLETE
+# Phase 2: Core Communication & Control (Priority: High) ✅ COMPLETE
 
 ## 2.1 Modbus TCP Client ✅ COMPLETED
 - [x] **Implement async Modbus TCP client** using `tokio-modbus`
-- [x] **Create register reading utilities**:
-  - `read_holding_registers()` ✅
-  - `read_modbus_string()` - Framework ready
-  - `decode_32bit_float()` ✅
-  - `decode_64bit_float()` ✅
-- [x] **Implement connection management** with automatic reconnection
-- [x] **Add retry logic** with exponential backoff - Basic retry logic implemented
-- [x] **Create error handling** for Modbus-specific errors - Comprehensive error handling
-- [x] **Implement timeout handling** for all operations
-- [x] **Add connection pooling** for performance optimization - Connection manager ready
+- [x] **Register utilities**: `decode_32bit_float`, `decode_64bit_float`, `decode_string`
+- [x] **Connection management** with automatic reconnection via manager
+- [x] **Retry logic** with reconnect on connection errors
+- [x] **Comprehensive Modbus error/timeout handling**
 - [x] **Upgrade tokio-modbus to 0.16.1** and adopt nested `Result` handling
 
 ## 2.2 Core Driver Logic
-- [x] **Implement main driver state machine** with `tokio::sync::mpsc` (command channel scaffold)
-- [x] **Create polling loop** for periodic data collection (voltages, currents, power, energy, status)
-- [x] **Implement charging control algorithms (initial)**:
-  - Manual mode ✅
-  - Auto mode (solar-based heuristic) ✅
-  - Scheduled mode (timezone-aware windows) ✅
-- [x] **Add state persistence** for mode/start/stop/set_current + session snapshot
-- [x] **Wire persistence and sessions** into the driver run loop
+- [x] **Main driver state machine** with `tokio::sync::mpsc`
+- [x] **Polling loop** for periodic data collection (voltages, currents, power, energy, status)
+- [x] **Charging control algorithms**: Manual, Auto (PV), Scheduled (time/Tibber)
+- [x] **State persistence** for mode/start/stop/set_current + session snapshot
+- [x] **Sessions wired** into the driver run loop
+- [x] **Auto 1P/3P switching with grace/settle**
 
 ## 2.3 Session Management
 - [x] **Implement charging session tracking** with start/end detection
@@ -134,10 +126,10 @@ phaeton/
 - [ ] **Export complete object tree** with properties for all Venus OS paths (beyond cached reflection)
 
 ## 3.2 Web Server & API
-- [x] **Migrate web framework**: fully migrated from `warp` to `axum` (no legacy code)
-- [x] **Create REST API**: status, mode, start/stop, set current, config get/put, config schema
-- [x] **Logs endpoints**: head, tail, download
-- [x] **Updates endpoints**: status/check/apply (backed by stubs)
+- [x] **Axum**-based server with CORS/trace
+- [x] **REST API**: status, mode, start/stop, set current, set phases, config get/put/schema, sessions, dbus
+- [x] **Logs endpoints**: head, tail, download, stream; web log level get/set
+- [x] **Updater endpoints**: status/check/apply/releases
 - [x] **SSE** at `/api/events` for live status
 - [x] **Static UI** under `/ui` and alias `/app`
 - [x] **OpenAPI/Swagger** at `/openapi.json` and `/docs`
@@ -146,12 +138,11 @@ phaeton/
 
 # Phase 4: Advanced Features (Priority: Medium) 🚧
 
-## 4.1 Tibber Integration
-- [ ] **Implement Tibber API client** using `reqwest`
-- [ ] **Create price data fetching** with proper authentication
-- [ ] **Implement pricing strategies**: level, threshold, percentile
-- [ ] **Add hourly price overview** generation
-- [ ] **Implement price caching** and offline fallbacks
+## 4.1 Tibber Integration (feature `tibber`)
+- [x] **Tibber API client** using `reqwest` with GraphQL and caching
+- [x] **Pricing strategies**: level, threshold, percentile
+- [x] **Hourly plan** via `/api/tibber/plan`
+- [ ] **Improve error handling/retries** and add tests
 
 ## 4.2 Vehicle Integration
 - [ ] **Create Tesla API client** with OAuth2 authentication
@@ -161,9 +152,8 @@ phaeton/
 - [ ] **Create vehicle data sanitization** and normalization
 - [ ] **Add multiple vehicle support** with individual configurations
 
-## 4.3 Update Management
-- [ ] **Implement release update checking**
-- [ ] **Create update download** and verification system
+## 4.3 Update Management (feature `updater`, default-enabled)
+- [x] **List releases**, **check**, and **apply** updates (binary/package) with restart
 - [ ] **Add update scheduling** and automatic restarts
 - [ ] **Add update rollback** capability for failed deployments
 
@@ -200,7 +190,7 @@ phaeton/
 ## 6.1 Build System
 - [x] **Configure cross-compilation** scaffolding for ARM architecture
 - [x] **Implement CI/CD pipeline** with automated testing and cross artifacts (GitHub Actions)
-- [ ] **Add binary packaging** for different target platforms
+- [x] **Binary packaging** for ARMv7, AArch64, x86_64 via composite action
 
 ## 6.2 Monitoring & Observability
 - [ ] **Add Prometheus metrics** for system monitoring
@@ -269,16 +259,14 @@ phaeton/
 
 ## Priority Backlog (next up)
 
-- [ ] Implement Modbus write for `SetCurrent` in `ChargingControls::apply_current` and driver loop
 - [ ] D‑Bus: Export full object tree and writable items parity with Venus OS paths
 - [ ] Web security: add simple token-based auth and basic rate limiting
-- [ ] Updater: implement `Updater::check_for_updates` and `apply_updates`
-- [ ] Tibber: finalize feature-gated client, error handling, and unit tests for strategies
+- [ ] Tibber: robust error handling/retries and unit tests for strategies
 - [ ] Metrics: expose Prometheus endpoint `/metrics` (keep JSON metrics at `/api/metrics`)
 - [ ] Persistence: key-based storage for sessions and config revisions
-- [ ] Vehicle integrations: scaffold Tesla and Kia clients (feature-gated, no secrets in repo)
-- [ ] CI: ensure all-feature build matrix and publish artifacts with checksums
+- [ ] Vehicle integrations: scaffold Tesla and Kia clients (feature-gated)
+- [ ] CI: expand all-feature build matrix and publish artifacts with checksums
 - [ ] Docs: configuration reference and troubleshooting guide
 
 Notes:
-- Prefer not to suppress clippy complexity; refactor if needed
+- Prefer not to suppress `clippy::cognitive_complexity`; refactor to reduce complexity where flagged
