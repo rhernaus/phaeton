@@ -269,7 +269,20 @@ impl TibberClient {
                     }
                 }
             }
-            upcoming.sort_by(|a, b| a.starts_at.cmp(&b.starts_at));
+            // Sort by actual epoch time to handle differing timezone offsets/DST correctly
+            upcoming.sort_by(|a, b| {
+                let ta = chrono::DateTime::parse_from_rfc3339(&a.starts_at)
+                    .ok()
+                    .map(|dt| dt.timestamp());
+                let tb = chrono::DateTime::parse_from_rfc3339(&b.starts_at)
+                    .ok()
+                    .map(|dt| dt.timestamp());
+                match (ta, tb) {
+                    (Some(x), Some(y)) => x.cmp(&y),
+                    // Fallback to lexicographic order if parsing fails for either side
+                    _ => a.starts_at.cmp(&b.starts_at),
+                }
+            });
             self.cached_upcoming = upcoming;
 
             let mut next_refresh = 0.0;

@@ -193,9 +193,9 @@ pub async fn get_plan_json(cfg: &crate::config::TibberConfig) -> Result<serde_js
         let end_at = if let Some(next) = upcoming.get(idx + 1) {
             next.starts_at.clone()
         } else {
-            // Fallback: add 1h to start
+            // Fallback: add 1h to start, preserving the original timezone offset
             match chrono::DateTime::parse_from_rfc3339(&p.starts_at) {
-                Ok(dt) => chrono::DateTime::<chrono::Utc>::from(dt)
+                Ok(dt) => dt
                     .checked_add_signed(chrono::Duration::hours(1))
                     .map(|v| v.to_rfc3339())
                     .unwrap_or_else(|| p.starts_at.clone()),
