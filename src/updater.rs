@@ -266,7 +266,9 @@ impl GitUpdater {
     }
 
     fn current_version_string() -> String {
-        env!("CARGO_PKG_VERSION").to_string()
+        option_env!("APP_VERSION")
+            .unwrap_or(env!("CARGO_PKG_VERSION"))
+            .to_string()
     }
 
     fn normalize_tag(tag: &str) -> &str {
