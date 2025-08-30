@@ -41,4 +41,6 @@ mod tests {
         // No D-Bus attached -> None
         assert!(d.calculate_excess_pv_power(0.0).await.is_none());
     }
+
+    // Positive-case with D-Bus is not reliable in unit tests without a real D-Bus.
 }

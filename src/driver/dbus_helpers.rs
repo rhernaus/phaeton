@@ -319,14 +319,22 @@ mod tests {
         }
 
         impl MockModbusStrings {
-            fn new() -> Self { Self { reads: HashMap::new() } }
+            fn new() -> Self {
+                Self {
+                    reads: HashMap::new(),
+                }
+            }
             fn regs_from_str(s: &str, reg_count: u16) -> Vec<u16> {
                 let bytes = s.as_bytes();
                 let mut out: Vec<u16> = Vec::new();
                 let mut i = 0;
                 while i < bytes.len() {
                     let hi = bytes[i] as u16;
-                    let lo = if i + 1 < bytes.len() { bytes[i + 1] as u16 } else { 0 };
+                    let lo = if i + 1 < bytes.len() {
+                        bytes[i + 1] as u16
+                    } else {
+                        0
+                    };
                     out.push((hi << 8) | lo);
                     i += 2;
                 }
@@ -345,7 +353,9 @@ mod tests {
 
         #[async_trait::async_trait]
         impl ModbusLike for MockModbusStrings {
-            fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+            fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+                self
+            }
             async fn read_holding_registers(
                 &mut self,
                 slave_id: u8,
