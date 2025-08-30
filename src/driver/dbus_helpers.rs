@@ -197,7 +197,9 @@ impl super::AlfenDriver {
                     ),
                     (
                         "/Mgmt/ProcessVersion".to_string(),
-                        serde_json::json!(env!("CARGO_PKG_VERSION")),
+                        serde_json::json!(
+                            option_env!("APP_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
+                        ),
                     ),
                     ("/Mgmt/Connection".to_string(), serde_json::json!(conn_str)),
                     (

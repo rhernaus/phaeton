@@ -1,6 +1,6 @@
 [package]
 name = "phaeton"
-version = "0.15.0"
+version = "0.15.1"
 edition = "2024"
 description = "Phaeton - EV Charger Driver for Victron Venus OS"
 authors = ["Your Name <your.email@example.com>"]
@@ -9,6 +9,7 @@ keywords = ["ev", "charger", "modbus", "victron", "venus"]
 categories = ["embedded", "api-bindings"]
 repository = "https://github.com/rhernaus/phaeton"
 readme = "README.md"
+build = "build.rs"
 
 [dependencies]
 # Async runtime (trimmed features)

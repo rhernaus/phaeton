@@ -356,12 +356,12 @@ impl AlfenDriver {
         self.last_sent_current = 0.0;
         self.last_current_set_time = std::time::Instant::now();
 
-        // Write the phases register
-        let station_id = self.config.modbus.station_slave_id;
+        // Write the phases register (socket slave as per register table 1215)
+        let socket_id = self.config.modbus.socket_slave_id;
         let addr_phases = self.config.registers.phases;
         let value: u16 = if target == 3 { 3 } else { 1 };
         let write_ok = if let Some(mgr) = self.modbus_manager.as_mut() {
-            mgr.write_multiple_registers(station_id, addr_phases, &[value])
+            mgr.write_multiple_registers(socket_id, addr_phases, &[value])
                 .await
                 .is_ok()
         } else {
