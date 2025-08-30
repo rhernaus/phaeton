@@ -247,3 +247,38 @@ pub fn routes() -> Router<AppState> {
             post(set_web_log_level).get(get_web_log_level),
         )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn name_matches_variants() {
+        assert!(name_matches("phaeton.log", "phaeton", "log"));
+        assert!(name_matches("phaeton.2024-01-01.log", "phaeton", "log"));
+        assert!(name_matches("phaeton.log.3", "phaeton", "log"));
+        assert!(!name_matches("other.log", "phaeton", "log"));
+    }
+
+    #[test]
+    fn derive_search_spec_resolves_dir_and_names() {
+        let (dir, pref, suff) = derive_search_spec(Path::new("/var/log/phaeton.log"));
+        assert_eq!(pref, "phaeton");
+        assert_eq!(suff, "log");
+        assert!(dir.ends_with("/var/log"));
+
+        let (dir2, pref2, suff2) = derive_search_spec(Path::new("/var/log/phaeton"));
+        assert_eq!(pref2, "phaeton");
+        assert_eq!(suff2, "log");
+        assert!(dir2.ends_with("/var/log/phaeton"));
+    }
+
+    #[tokio::test]
+    async fn resolve_log_file_path_prefers_existing_configured() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("phaeton.log");
+        tokio::fs::write(&file, "line\n").await.unwrap();
+        let found = resolve_log_file_path(file.to_str().unwrap()).await;
+        assert_eq!(found.unwrap(), file);
+    }
+}

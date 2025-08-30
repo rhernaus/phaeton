@@ -483,4 +483,39 @@ mod tests {
             assert!(shared.paths.contains_key(key), "missing path: {}", key);
         }
     }
+
+    #[tokio::test]
+    async fn ensure_item_and_update_path_without_connection() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut svc = DbusService::new(1, tx).await.unwrap();
+        // No connection started; ensure_item should still populate maps
+        svc.ensure_item("/Ac/L1/Voltage", serde_json::json!(230.0), true)
+            .await
+            .unwrap();
+
+        {
+            let shared = svc.shared.lock().unwrap();
+            assert_eq!(
+                shared.paths.get("/Ac/L1/Voltage"),
+                Some(&serde_json::json!(230.0))
+            );
+            assert!(shared.writable.contains("/Ac/L1/Voltage"));
+        }
+
+        // update_path should early-return OK if same value and not mutate
+        let rc = svc
+            .update_path("/Ac/L1/Voltage", serde_json::json!(230.0))
+            .await;
+        assert!(rc.is_ok());
+
+        // Now update to a different value
+        svc.update_path("/Ac/L1/Voltage", serde_json::json!(231.0))
+            .await
+            .unwrap();
+        let shared = svc.shared.lock().unwrap();
+        assert_eq!(
+            shared.paths.get("/Ac/L1/Voltage"),
+            Some(&serde_json::json!(231.0))
+        );
+    }
 }
