@@ -115,6 +115,8 @@ pub struct AlfenDriver {
     // Poll metrics
     total_polls: u64,
     overrun_count: u64,
+    /// Last observed Modbus connection state, for edge detection
+    last_modbus_connected: Option<bool>,
 
     // Last computed PV excess power
     last_excess_pv_power_w: f32,

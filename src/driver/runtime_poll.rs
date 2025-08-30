@@ -1,56 +1,14 @@
 use crate::error::Result;
 use std::sync::Arc;
 
+mod io;
 pub mod meas;
 mod phase;
+mod status;
 use meas::RealtimeMeasurements;
 
 impl super::AlfenDriver {
-    // decode_* and compute_status_* moved to meas.rs
-
-    /// Derive Victron-esque status from base hardware status and current context.
-    ///
-    /// Rule order (highest precedence first):
-    /// - StartStop=Stopped -> 6 (Wait start)
-    /// - Scheduled mode with inactive window -> 6 (Wait start)
-    /// - Auto or Scheduled with Low SoC -> 7 (Low SOC)
-    /// - Auto with near-zero current -> 4 (Wait sun)
-    /// - Fallback to base (0/1/2)
-    fn derive_status(&self, status_base: i32, soc_below_min: Option<bool>) -> i32 {
-        let connected = status_base == 1 || status_base == 2;
-        if !connected {
-            return status_base;
-        }
-
-        // Wait start due to explicit stop
-        if matches!(self.start_stop, crate::controls::StartStopState::Stopped) {
-            return 6;
-        }
-
-        // Low SOC for Auto and Scheduled (Manual continues)
-        if (matches!(self.current_mode, crate::controls::ChargingMode::Auto)
-            || matches!(self.current_mode, crate::controls::ChargingMode::Scheduled))
-            && soc_below_min == Some(true)
-        {
-            return 7;
-        }
-
-        // Wait start due to inactive schedule window
-        if matches!(self.current_mode, crate::controls::ChargingMode::Scheduled)
-            && !crate::controls::ChargingControls::is_schedule_active(&self.config)
-        {
-            return 6;
-        }
-
-        // Wait sun when Auto but not currently charging / near-zero available
-        if matches!(self.current_mode, crate::controls::ChargingMode::Auto)
-            && self.last_sent_current < 0.1
-        {
-            return 4;
-        }
-
-        status_base
-    }
+    // derive_status moved to status.rs
 
     async fn fetch_battery_soc_and_minimum_limit(&self) -> Option<(f64, f64)> {
         let dbus_guard = self.dbus.as_ref()?.lock().await;
@@ -87,6 +45,7 @@ impl super::AlfenDriver {
         None
     }
 
+    #[cfg(test)]
     async fn update_station_max_current_from_modbus(&mut self) {
         let station_id = self.config.modbus.station_slave_id;
         let addr_station_max = self.config.registers.station_max_current;
@@ -103,83 +62,7 @@ impl super::AlfenDriver {
         }
     }
 
-    async fn read_realtime_values(&mut self) -> RealtimeMeasurements {
-        let socket_id = self.config.modbus.socket_slave_id;
-        let addr_voltages = self.config.registers.voltages;
-        let addr_currents = self.config.registers.currents;
-        let addr_power = self.config.registers.power;
-        let addr_energy = self.config.registers.energy;
-        let addr_status = self.config.registers.status;
-
-        let manager = self.modbus_manager.as_mut().unwrap();
-
-        let t0 = std::time::Instant::now();
-        let voltages = manager
-            .read_holding_registers(socket_id, addr_voltages, 6)
-            .await
-            .ok();
-        let read_voltages_ms = t0.elapsed().as_millis() as u64;
-
-        let t1 = std::time::Instant::now();
-        let currents = manager
-            .read_holding_registers(socket_id, addr_currents, 6)
-            .await
-            .ok();
-        let read_currents_ms = t1.elapsed().as_millis() as u64;
-
-        let t2 = std::time::Instant::now();
-        let power_regs = manager
-            .read_holding_registers(socket_id, addr_power, 8)
-            .await
-            .ok();
-        let read_powers_ms = t2.elapsed().as_millis() as u64;
-
-        let t3 = std::time::Instant::now();
-        let energy_regs = manager
-            .read_holding_registers(socket_id, addr_energy, 4)
-            .await
-            .ok();
-        let read_energy_ms = t3.elapsed().as_millis() as u64;
-
-        let t4 = std::time::Instant::now();
-        let status_regs = manager
-            .read_holding_registers(socket_id, addr_status, 5)
-            .await
-            .ok();
-        let read_status_ms = t4.elapsed().as_millis() as u64;
-
-        let t5 = std::time::Instant::now();
-        self.update_station_max_current_from_modbus().await;
-        let read_station_max_ms = t5.elapsed().as_millis() as u64;
-
-        let voltages_triplet = Self::decode_triplet(&voltages);
-        let currents_triplet = Self::decode_triplet(&currents);
-        let (powers_triplet, total_power) =
-            Self::decode_powers(&power_regs, &voltages_triplet, &currents_triplet);
-        let energy_kwh = Self::decode_energy_kwh(&energy_regs);
-        let status = Self::compute_status_from_regs(&status_regs);
-
-        // Record timings for this segment
-        self.last_poll_steps
-            .get_or_insert_with(Default::default)
-            .read_voltages_ms = Some(read_voltages_ms);
-        if let Some(ref mut steps) = self.last_poll_steps {
-            steps.read_currents_ms = Some(read_currents_ms);
-            steps.read_powers_ms = Some(read_powers_ms);
-            steps.read_energy_ms = Some(read_energy_ms);
-            steps.read_status_ms = Some(read_status_ms);
-            steps.read_station_max_ms = Some(read_station_max_ms);
-        }
-
-        RealtimeMeasurements {
-            voltages: voltages_triplet,
-            currents: currents_triplet,
-            powers: powers_triplet,
-            total_power,
-            energy_kwh,
-            status,
-        }
-    }
+    // read_realtime_values moved to io.rs
 
     fn ev_power_for_subtract(&self, p_total: f64) -> f64 {
         let lag_ms = self.config.controls.ev_reporting_lag_ms as u128;
@@ -487,82 +370,31 @@ impl super::AlfenDriver {
         self.logger.debug("Starting poll cycle");
         if self.modbus_manager.is_some() {
             let m = self.read_realtime_values().await;
-
             let now_secs = (std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default())
             .as_secs_f64();
             let requested = self.intended_set_current;
 
-            let t_pv0 = std::time::Instant::now();
-            let ev_power_for_subtract = self.ev_power_for_subtract(m.total_power);
-            let excess_pv_power_w: f32 = self
-                .calculate_excess_pv_power(ev_power_for_subtract)
-                .await
-                .unwrap_or(0.0);
-            let pv_excess_ms = t_pv0.elapsed().as_millis() as u64;
-            // Track excess PV for snapshots, with optional EMA smoothing
-            let alpha = self.config.controls.pv_excess_ema_alpha.clamp(0.0, 1.0);
-            let smoothed = if alpha > 0.0 {
-                alpha * excess_pv_power_w + (1.0f32 - alpha) * self.last_excess_pv_power_w
-            } else {
-                excess_pv_power_w
-            };
-            self.last_excess_pv_power_w = smoothed;
-            let t_eff0 = std::time::Instant::now();
-            // Phase switching logic in Auto mode with grace and settle periods
-            if matches!(self.current_mode, crate::controls::ChargingMode::Auto)
-                && self.config.controls.auto_phase_switch
-            {
-                self.evaluate_auto_phase_switch(self.last_excess_pv_power_w)
-                    .await;
-            }
-
-            let (mut effective, soc_below_min) = self
-                .compute_effective_current_with_soc(requested, now_secs, excess_pv_power_w)
+            let (excess_pv_power_w, pv_excess_ms) =
+                self.compute_pv_excess_smoothed(m.total_power).await;
+            self.maybe_evaluate_auto_phase_switch(excess_pv_power_w)
                 .await;
-            self.enforce_phase_settle_on_effective(&mut effective);
-            let compute_effective_ms = t_eff0.elapsed().as_millis() as u64;
-
-            let (should_update, _need_change, _interval_due) =
-                self.apply_current_if_needed(effective, excess_pv_power_w);
-            let mut write_current_ms: Option<u64> = None;
-            if should_update {
-                let t_wr0 = std::time::Instant::now();
-                if self.write_effective_current(effective).await {
-                    self.last_sent_current = effective;
-                    self.last_current_set_time = std::time::Instant::now();
-                    self.last_set_current_monotonic = std::time::Instant::now();
-                } else {
-                    self.logger.warn("Failed to write set current via Modbus");
-                }
-                write_current_ms = Some(t_wr0.elapsed().as_millis() as u64);
-            }
-
-            // Derive final status from base status and context
-            // During phase switch settle, expose Victron statuses: 22 (to 3P) or 23 (to 1P)
-            let derived_status = if let Some(deadline) = self.phase_settle_deadline
-                && std::time::Instant::now() < deadline
-                && let Some(to) = self.phase_switch_to
-            {
-                if to >= 3 { 22 } else { 23 }
-            } else {
-                self.phase_switch_to = None;
-                self.derive_status(m.status, soc_below_min) as u8
-            };
-            let t_fin0 = std::time::Instant::now();
-            self.finalize_cycle(&m, derived_status, effective)?;
-            let finalize_ms = t_fin0.elapsed().as_millis() as u64;
-
-            // Save per-step timings
-            let mut steps = self.last_poll_steps.take().unwrap_or_default();
-            steps.pv_excess_ms = Some(pv_excess_ms);
-            steps.compute_effective_ms = Some(compute_effective_ms);
-            steps.write_current_ms = write_current_ms;
-            steps.finalize_cycle_ms = Some(finalize_ms);
-            self.last_poll_steps = Some(steps);
+            let (effective, soc_below_min, compute_effective_ms) = self
+                .compute_effective_with_soc_and_settle(requested, now_secs, excess_pv_power_w)
+                .await;
+            let write_current_ms = self.maybe_write_current(effective, excess_pv_power_w).await;
+            let derived_status = self.derive_final_status(m.status, soc_below_min);
+            let finalize_ms = self.finalize_and_log(&m, derived_status, effective)?;
+            self.record_post_compute_timings(
+                pv_excess_ms,
+                compute_effective_ms,
+                write_current_ms,
+                finalize_ms,
+            );
         }
 
+        self.refresh_identity_on_connection_edge().await;
         self.logger.debug("Poll cycle completed");
         let t_snap0 = std::time::Instant::now();
         let snapshot = Arc::new(self.build_typed_snapshot(Some(self.last_poll_duration_ms())));
@@ -571,6 +403,119 @@ impl super::AlfenDriver {
         }
         let _ = self.status_snapshot_tx.send(snapshot);
         Ok(())
+    }
+
+    async fn compute_pv_excess_smoothed(&mut self, total_power: f64) -> (f32, u64) {
+        let t0 = std::time::Instant::now();
+        let ev_power_for_subtract = self.ev_power_for_subtract(total_power);
+        let raw: f32 = self
+            .calculate_excess_pv_power(ev_power_for_subtract)
+            .await
+            .unwrap_or(0.0);
+        let ms = t0.elapsed().as_millis() as u64;
+        let alpha = self.config.controls.pv_excess_ema_alpha.clamp(0.0, 1.0);
+        let smoothed = if alpha > 0.0 {
+            alpha * raw + (1.0f32 - alpha) * self.last_excess_pv_power_w
+        } else {
+            raw
+        };
+        self.last_excess_pv_power_w = smoothed;
+        (smoothed, ms)
+    }
+
+    async fn maybe_evaluate_auto_phase_switch(&mut self, excess_pv_power_w: f32) {
+        if matches!(self.current_mode, crate::controls::ChargingMode::Auto)
+            && self.config.controls.auto_phase_switch
+        {
+            self.evaluate_auto_phase_switch(excess_pv_power_w).await;
+        }
+    }
+
+    async fn compute_effective_with_soc_and_settle(
+        &mut self,
+        requested: f32,
+        now_secs: f64,
+        excess_pv_power_w: f32,
+    ) -> (f32, Option<bool>, u64) {
+        let t0 = std::time::Instant::now();
+        let (mut effective, soc_below_min) = self
+            .compute_effective_current_with_soc(requested, now_secs, excess_pv_power_w)
+            .await;
+        self.enforce_phase_settle_on_effective(&mut effective);
+        let ms = t0.elapsed().as_millis() as u64;
+        (effective, soc_below_min, ms)
+    }
+
+    async fn maybe_write_current(&mut self, effective: f32, excess_pv_power_w: f32) -> Option<u64> {
+        let (should_update, _need_change, _interval_due) =
+            self.apply_current_if_needed(effective, excess_pv_power_w);
+        if should_update {
+            let t0 = std::time::Instant::now();
+            if self.write_effective_current(effective).await {
+                self.last_sent_current = effective;
+                self.last_current_set_time = std::time::Instant::now();
+                self.last_set_current_monotonic = std::time::Instant::now();
+            } else {
+                self.logger.warn("Failed to write set current via Modbus");
+            }
+            Some(t0.elapsed().as_millis() as u64)
+        } else {
+            None
+        }
+    }
+
+    fn derive_final_status(&mut self, base_status: i32, soc_below_min: Option<bool>) -> u8 {
+        if let Some(deadline) = self.phase_settle_deadline
+            && std::time::Instant::now() < deadline
+            && let Some(to) = self.phase_switch_to
+        {
+            if to >= 3 { 22 } else { 23 }
+        } else {
+            self.phase_switch_to = None;
+            self.derive_status(base_status, soc_below_min) as u8
+        }
+    }
+
+    fn finalize_and_log(
+        &mut self,
+        m: &RealtimeMeasurements,
+        derived_status: u8,
+        effective: f32,
+    ) -> Result<u64> {
+        let t0 = std::time::Instant::now();
+        self.finalize_cycle(m, derived_status, effective)?;
+        Ok(t0.elapsed().as_millis() as u64)
+    }
+
+    fn record_post_compute_timings(
+        &mut self,
+        pv_excess_ms: u64,
+        compute_effective_ms: u64,
+        write_current_ms: Option<u64>,
+        finalize_ms: u64,
+    ) {
+        let mut steps = self.last_poll_steps.take().unwrap_or_default();
+        steps.pv_excess_ms = Some(pv_excess_ms);
+        steps.compute_effective_ms = Some(compute_effective_ms);
+        steps.write_current_ms = write_current_ms;
+        steps.finalize_cycle_ms = Some(finalize_ms);
+        self.last_poll_steps = Some(steps);
+    }
+
+    async fn refresh_identity_on_connection_edge(&mut self) {
+        if let Some(conn) = self
+            .modbus_manager
+            .as_ref()
+            .and_then(|m| m.connection_status())
+        {
+            let prev = self.last_modbus_connected;
+            if prev != Some(conn) {
+                self.last_modbus_connected = Some(conn);
+                if conn {
+                    let _ = self.refresh_charger_identity().await;
+                }
+            }
+        }
     }
 
     // evaluate_auto_phase_switch moved to phase.rs
