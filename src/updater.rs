@@ -12,6 +12,7 @@ use pulldown_cmark::{Options, Parser, html};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+mod package;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReleaseInfo {
@@ -233,9 +234,22 @@ impl GitUpdater {
 
         // Download to temp file
         let tmp_path = Self::download_to_temp(&client, url).await?;
-        // Replace current executable
-        Self::replace_current_executable(&tmp_path)?;
-        // Attempt restart
+
+        // If this is a tar.gz package, extract and install all contents; otherwise treat as single binary
+        let asset_name = asset
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+
+        if asset_name.ends_with(".tar.gz") || package::is_gzip_file(&tmp_path).unwrap_or(false) {
+            package::apply_package_archive(&tmp_path)?;
+        } else {
+            // Replace current executable only
+            Self::replace_current_executable(&tmp_path)?;
+        }
+
+        // Attempt restart after installation
         Self::restart_after_delay(Duration::from_secs(1));
         Ok(())
     }
