@@ -44,6 +44,8 @@ zbus = { version = "5.10", default-features = false, features = ["tokio"] }
 reqwest = { version = "0.12", optional = true, default-features = false, features = ["json", "rustls-tls"] }
 pulldown-cmark = { version = "0.13", optional = true }
 ammonia = { version = "4.0", optional = true }
+tar = { version = "0.4", optional = true }
+flate2 = { version = "1", optional = true, default-features = false, features = ["rust_backend"] }
 
 # Date and time handling
 chrono = { version = "0.4", features = ["serde"] }
@@ -138,7 +140,8 @@ openapi = ["dep:utoipa", "dep:utoipa-swagger-ui", "dep:schemars"]
 tibber = ["dep:reqwest"]
 
 # Enable self-updater HTTP client and release notes rendering
-updater = ["dep:reqwest", "dep:pulldown-cmark", "dep:ammonia"]
+# Also include tar.gz extraction support to install full release packages
+updater = ["dep:reqwest", "dep:pulldown-cmark", "dep:ammonia", "dep:tar", "dep:flate2"]
 
 # Optional compression features for tower-http
 compression = ["tower-http/compression-br", "tower-http/compression-gzip"]
