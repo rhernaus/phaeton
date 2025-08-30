@@ -130,6 +130,10 @@ pub struct AlfenDriver {
     last_phase_switch: Option<std::time::Instant>,
     /// If currently settling after a phase switch, this is the deadline
     phase_settle_deadline: Option<std::time::Instant>,
+
+    /// If set during a phase switch settle period, indicates the target phase count (1 or 3)
+    /// Used to expose Victron D-Bus status 22/23 (switching to 3P/1P)
+    phase_switch_to: Option<u8>,
 }
 
 impl AlfenDriver {
@@ -368,10 +372,23 @@ impl AlfenDriver {
             let settle = self.config.controls.phase_switch_settle_seconds as u64;
             self.phase_settle_deadline =
                 Some(std::time::Instant::now() + std::time::Duration::from_secs(settle));
+            self.phase_switch_to = Some(target);
             self.logger.info(&format!(
                 "Switched phases to {}P; settling for {}s (prev current {:.1} A)",
                 target, settle, prev_current
             ));
+            // Update D-Bus to reflect switching status immediately (22/23)
+            if let Some(dbus) = &self.dbus {
+                let status_code: u8 = if target == 3 { 22 } else { 23 };
+                let _ = dbus
+                    .lock()
+                    .await
+                    .update_paths([
+                        ("/Status".to_string(), serde_json::json!(status_code)),
+                        ("/Ac/PhaseCount".to_string(), serde_json::json!(target)),
+                    ])
+                    .await;
+            }
             true
         } else {
             self.logger

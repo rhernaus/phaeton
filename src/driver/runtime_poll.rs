@@ -539,7 +539,16 @@ impl super::AlfenDriver {
             }
 
             // Derive final status from base status and context
-            let derived_status = self.derive_status(m.status, soc_below_min) as u8;
+            // During phase switch settle, expose Victron statuses: 22 (to 3P) or 23 (to 1P)
+            let derived_status = if let Some(deadline) = self.phase_settle_deadline
+                && std::time::Instant::now() < deadline
+                && let Some(to) = self.phase_switch_to
+            {
+                if to >= 3 { 22 } else { 23 }
+            } else {
+                self.phase_switch_to = None;
+                self.derive_status(m.status, soc_below_min) as u8
+            };
             let t_fin0 = std::time::Instant::now();
             self.finalize_cycle(&m, derived_status, effective)?;
             let finalize_ms = t_fin0.elapsed().as_millis() as u64;
