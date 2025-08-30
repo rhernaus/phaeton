@@ -178,6 +178,7 @@ impl super::AlfenDriver {
             serial: None,
             total_polls: 0,
             overrun_count: 0,
+            last_modbus_connected: None,
             last_excess_pv_power_w: 0.0,
             last_poll_steps: None,
 

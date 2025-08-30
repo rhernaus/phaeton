@@ -80,6 +80,24 @@ impl super::AlfenDriver {
             .map(|regs| crate::modbus::decode_string(&regs, None).unwrap_or_default())
             .unwrap_or_default();
 
+        // Read Station Max Current once per successful connection
+        let station_max_current = manager
+            .read_holding_registers(
+                self.config.modbus.station_slave_id,
+                self.config.registers.station_max_current,
+                2,
+            )
+            .await
+            .ok()
+            .and_then(|regs| {
+                if regs.len() >= 2 {
+                    crate::modbus::decode_32bit_float(&regs[0..2]).ok()
+                } else {
+                    None
+                }
+            })
+            .filter(|v| v.is_finite() && *v > 0.0);
+
         if let Some(dbus) = &self.dbus {
             let mut updates: Vec<(String, serde_json::Value)> = Vec::with_capacity(3);
             if !manufacturer.is_empty() {
@@ -95,33 +113,55 @@ impl super::AlfenDriver {
             if !serial.is_empty() {
                 updates.push(("/Serial".to_string(), serde_json::json!(serial.clone())));
             }
-            if !updates.is_empty() {
-                let product_name = if !manufacturer.is_empty() {
-                    format!("{} EV Charger", manufacturer)
-                } else {
-                    "Alfen EV Charger".to_string()
-                };
-                self.logger.info(&format!(
-                    "Publishing charger identity: product_name='{}', firmware='{}', serial='{}'",
-                    product_name, firmware, serial
-                ));
-                let _ = dbus.lock().await.update_paths(updates).await;
-            } else {
-                self.logger
-                    .warn("Charger identity not available via Modbus; leaving defaults");
+            if let Some(maxc) = station_max_current {
+                updates.push(("/MaxCurrent".to_string(), serde_json::json!(maxc)));
             }
+            self.publish_identity_updates(dbus, &manufacturer, &firmware, &serial, updates)
+                .await;
         }
 
+        self.update_cached_identity(&manufacturer, &firmware, &serial);
+        if let Some(maxc) = station_max_current {
+            self.station_max_current = maxc;
+        }
+        Ok(())
+    }
+
+    async fn publish_identity_updates(
+        &self,
+        dbus: &std::sync::Arc<tokio::sync::Mutex<crate::dbus::DbusService>>,
+        manufacturer: &str,
+        firmware: &str,
+        serial: &str,
+        updates: Vec<(String, serde_json::Value)>,
+    ) {
+        if updates.is_empty() {
+            self.logger
+                .warn("Charger identity not available via Modbus; leaving defaults");
+            return;
+        }
+        let product_name = if !manufacturer.is_empty() {
+            format!("{} EV Charger", manufacturer)
+        } else {
+            "Alfen EV Charger".to_string()
+        };
+        self.logger.info(&format!(
+            "Publishing charger identity: product_name='{}', firmware='{}', serial='{}'",
+            product_name, firmware, serial
+        ));
+        let _ = dbus.lock().await.update_paths(updates).await;
+    }
+
+    fn update_cached_identity(&mut self, manufacturer: &str, firmware: &str, serial: &str) {
         if !manufacturer.is_empty() {
             self.product_name = Some(format!("{} EV Charger", manufacturer));
         }
         if !firmware.is_empty() {
-            self.firmware_version = Some(firmware.clone());
+            self.firmware_version = Some(firmware.to_string());
         }
         if !serial.is_empty() {
-            self.serial = Some(serial.clone());
+            self.serial = Some(serial.to_string());
         }
-        Ok(())
     }
 
     pub(crate) async fn try_start_dbus_with_identity(&mut self) -> Result<()> {
