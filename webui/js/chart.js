@@ -11,6 +11,7 @@ window.stepHistory = {
   points: [],
   windowSec: 300,
   maxBufferSec: 21600,
+  hoverT: null,
 };
 
 window.addHistoryPoint = function (s) {
@@ -147,6 +148,66 @@ window.drawStepsChart = function () {
   keys.forEach(([k, col]) => plot(col, k));
   ctx.strokeStyle = 'rgba(255,255,255,0.2)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(40, 10); ctx.lineTo(40, H - 20); ctx.lineTo(W - 20, H - 20); ctx.stroke();
   ctx.fillStyle = '#8899aa'; ctx.font = '12px -apple-system, sans-serif'; ctx.fillText(`${vMax} ms`, 4, mapY(vMax) + 4); ctx.fillText('0', 20, H - 22);
+
+  // Hover highlight and dynamic legend
+  const tip = $('steps_tooltip');
+  if (stepHistory.hoverT && tip) {
+    // Find nearest point by time
+    let nearest = visible[0]; let bestDt = Math.abs(stepHistory.hoverT - nearest.t);
+    for (let i = 1; i < visible.length; i++) { const dt = Math.abs(stepHistory.hoverT - visible[i].t); if (dt < bestDt) { bestDt = dt; nearest = visible[i]; } }
+    const x = mapX(nearest.t);
+    // Vertical guide
+    ctx.strokeStyle = 'rgba(148,163,184,0.6)'; ctx.beginPath(); ctx.moveTo(x, 10); ctx.lineTo(x, H - 20); ctx.stroke();
+    // Dots for each step at this poll
+    let totalMs = 0;
+    const items = [];
+    const nameMap = {
+      read_voltages_ms: 'Voltages',
+      read_currents_ms: 'Currents',
+      read_powers_ms: 'Powers',
+      read_energy_ms: 'Energy',
+      read_status_ms: 'Status',
+      read_station_max_ms: 'StationMax',
+      pv_excess_ms: 'PV Excess',
+      compute_effective_ms: 'Compute',
+      write_current_ms: 'Write',
+      finalize_cycle_ms: 'Finalize',
+      snapshot_build_ms: 'Snapshot',
+    };
+    keys.forEach(([k, col]) => {
+      const v = Number(nearest[k]);
+      if (!Number.isFinite(v)) return;
+      totalMs += v;
+      const y = mapY(v);
+      window.drawDotOnChart(ctx, x, y, col);
+      items.push({ key: k, name: nameMap[k] || k, color: col, value: v });
+    });
+    // Tooltip content
+    const d = new Date(nearest.t * 1000);
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    const ss = String(d.getSeconds()).padStart(2, '0');
+    let html = `<div style="font-weight:600;margin-bottom:6px">${hh}:${mm}:${ss} — Total ${Math.round(totalMs)} ms</div>`;
+    html += '<div style="display:grid;grid-template-columns:auto 1fr auto;gap:6px;align-items:center">';
+    items.forEach(it => {
+      html += `<span style="width:10px;height:10px;border-radius:50%;background:${it.color};display:inline-block"></span>`;
+      html += `<span style="color:#cbd5e1">${it.name}</span>`;
+      html += `<span style="text-align:right;color:#e2e8f0">${Math.round(it.value)} ms</span>`;
+    });
+    html += '</div>';
+    tip.innerHTML = html;
+    // Position tooltip above the canvas at the hovered x
+    const rect = canvas.getBoundingClientRect();
+    const parent = canvas.parentElement;
+    const parentRect = parent ? parent.getBoundingClientRect() : { left: 0, top: 0, width: rect.width };
+    const canvasCssW = rect.width; const scale = canvasCssW / W; const cssX = x * scale + (rect.left - parentRect.left);
+    const top = rect.top - parentRect.top + 12;
+    tip.style.left = `${cssX}px`;
+    tip.style.top = `${top}px`;
+    tip.style.display = '';
+  } else if (tip) {
+    tip.style.display = 'none';
+  }
 };
 
 window.resizeChartCanvas = function () {
@@ -185,6 +246,32 @@ document.getElementById('range')?.addEventListener('change', e => {
   canvas.addEventListener('mouseleave', () => {
     chartHistory.hoverT = null;
     window.drawChart();
+  });
+})();
+
+(function initStepsHover() {
+  const canvas = document.getElementById('steps_chart');
+  if (!canvas) return;
+  canvas.addEventListener('mousemove', e => {
+    const rect = canvas.getBoundingClientRect();
+    const cssX = e.clientX - rect.left;
+    if (stepHistory.points.length < 2) return;
+    const tEnd = stepHistory.points[stepHistory.points.length - 1].t;
+    const tMinDesired = tEnd - stepHistory.windowSec;
+    const visible = stepHistory.points.filter(p => p.t >= tMinDesired);
+    if (visible.length < 2) return;
+    const tMin = visible[0].t;
+    const tMax = visible[visible.length - 1].t;
+    const tSpan = Math.max(1, tMax - tMin);
+    const rectW = rect.width;
+    const x = Math.max(40, Math.min(rectW - 20, cssX));
+    const frac = (x - 40) / Math.max(1, rectW - 60);
+    stepHistory.hoverT = tMin + frac * tSpan;
+    window.drawStepsChart();
+  });
+  canvas.addEventListener('mouseleave', () => {
+    stepHistory.hoverT = null;
+    window.drawStepsChart();
   });
 })();
 
