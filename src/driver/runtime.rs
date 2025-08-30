@@ -182,7 +182,7 @@ impl super::AlfenDriver {
             last_poll_steps: None,
 
             desired_phases: 3,
-            applied_phases: 0,
+            applied_phases: 3,
             last_phase_switch: None,
             phase_settle_deadline: None,
         })
