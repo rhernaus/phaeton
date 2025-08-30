@@ -138,6 +138,8 @@ impl VehicleIntegration {
     }
 }
 
+// tests for vehicle clients live in integration tests to keep module tidy
+
 impl Default for VehicleIntegration {
     fn default() -> Self {
         Self::new()

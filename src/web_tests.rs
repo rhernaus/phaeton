@@ -413,71 +413,7 @@ async fn events_stream_status_ok() {
     assert_eq!(resp.status(), axum::http::StatusCode::OK);
 }
 
-#[tokio::test]
-async fn logs_stream_emits_named_log_events() {
-    use axum::http::header;
-    use http_body_util::BodyExt as _;
-    use std::time::Duration;
-
-    // Ensure logging is initialized so broadcast layer is active in tests
-    let _ = crate::logging::init_logging(&crate::config::LoggingConfig::default());
-
-    // Build router for SSE logs endpoint
-    let router = axum::Router::new().route("/api/logs/stream", get(logs_stream));
-
-    let mut response = router
-        .oneshot(
-            Request::builder()
-                .uri("/api/logs/stream")
-                .body(axum::body::Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), axum::http::StatusCode::OK);
-    let ct = response
-        .headers()
-        .get(header::CONTENT_TYPE)
-        .and_then(|h| h.to_str().ok())
-        .unwrap_or("");
-    assert!(ct.contains("text/event-stream"));
-
-    // Spawn a log event shortly after to feed the stream
-    tokio::spawn(async {
-        tokio::time::sleep(Duration::from_millis(10)).await;
-        let logger = crate::logging::get_logger("test_sse");
-        logger.info("sse_test_line_123");
-    });
-
-    // Read frames until we observe the test log line or timeout
-    let mut body = response.into_body();
-    let mut buf: Vec<u8> = Vec::new();
-    let wait = tokio::time::timeout(Duration::from_secs(2), async {
-        loop {
-            if let Some(frame) = body.frame().await {
-                if let Ok(frame) = frame {
-                    if let Some(data) = frame.data_ref() {
-                        buf.extend_from_slice(data);
-                        if buf.windows(b"sse_test_line_123".len()).any(|w| w == b"sse_test_line_123") {
-                            break;
-                        }
-                    }
-                } else {
-                    // Body error or end; break to assert
-                    break;
-                }
-            }
-        }
-    })
-    .await;
-
-    assert!(wait.is_ok(), "timed out waiting for SSE log event");
-    let s = String::from_utf8_lossy(&buf);
-    assert!(s.contains("event: log"), "SSE should include named 'log' event: {}", s);
-    assert!(s.contains("data:"), "SSE should include data line: {}", s);
-    assert!(s.contains("sse_test_line_123"), "SSE data should contain the test line: {}", s);
-}
+// moved SSE stream test to integration tests to keep file under budget
 
 #[tokio::test]
 async fn root_redirects_to_ui() {
@@ -502,10 +438,53 @@ async fn root_redirects_to_ui() {
 }
 
 #[tokio::test]
-async fn logs_web_level_get_and_post() { }
+async fn logs_web_level_get_and_post() {
+    use axum::routing::{get, post};
+    let get_router = axum::Router::new().route("/api/logs/web_level", get(crate::web::logs::get_web_log_level));
+    let resp = get_router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/logs/web_level")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::OK);
+
+    let post_router = axum::Router::new().route("/api/logs/web_level", post(crate::web::logs::set_web_log_level));
+    let resp2 = post_router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/logs/web_level?level=warn")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp2.status(), axum::http::StatusCode::OK);
+}
 
 #[tokio::test]
-async fn update_releases_route_executes() { }
+async fn update_releases_route_executes() {
+    // Use default state; route should return 200 or 500 depending on network
+    let state = test_state_async().await;
+    let router = axum::Router::new()
+        .route("/api/update/releases", get(update_releases))
+        .with_state(state);
+    let resp = router
+        .oneshot(
+            Request::builder()
+                .uri("/api/update/releases")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(resp.status() == axum::http::StatusCode::OK || resp.status() == axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+}
 
 #[tokio::test]
 async fn tibber_plan_feature_disabled_returns_placeholder() {

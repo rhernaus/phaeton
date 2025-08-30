@@ -518,4 +518,19 @@ mod tests {
             Some(&serde_json::json!(231.0))
         );
     }
+
+    #[tokio::test]
+    async fn read_remote_value_without_connection_errors() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let svc = DbusService::new(0, tx).await.unwrap();
+        let err = svc
+            .read_remote_value("com.victronenergy.system", "/Ac/Power")
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .to_lowercase()
+                .contains("no d-bus connection")
+        );
+    }
 }

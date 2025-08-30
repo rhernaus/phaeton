@@ -89,6 +89,19 @@ mod tests {
         // OwnedValue cannot be directly compared to JSON; ensure debug formatting works
         let _s = format!("{:?}", ov);
     }
+
+    #[tokio::test]
+    async fn get_items_includes_text_fields() {
+        let shared = make_shared_with_paths(&[
+            ("/Ac/Power", serde_json::json!(123.4)),
+            ("/Ac/Current", serde_json::json!(6.0)),
+        ]);
+        let root = RootBus { shared };
+        let items = root.get_items().await;
+        let p = items.get("/Ac/Power").unwrap();
+        assert!(p.get("Value").is_some());
+        assert!(p.get("Text").is_some());
+    }
 }
 
 impl RootBus {

@@ -135,7 +135,13 @@ impl GitUpdater {
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
                 let draft = r.get("draft").and_then(|v| v.as_bool()).unwrap_or(false);
-                if !include_prerelease && (prerelease || draft) {
+                // Allow nightly tag to appear even when prereleases are hidden
+                let tag_is_nightly = r
+                    .get("tag_name")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.eq_ignore_ascii_case("nightly"))
+                    .unwrap_or(false);
+                if !include_prerelease && (prerelease || draft) && !tag_is_nightly {
                     continue;
                 }
                 let tag = r
@@ -436,6 +442,7 @@ impl GitUpdater {
             #[cfg(unix)]
             {
                 use std::os::unix::process::CommandExt;
+                let logger = get_logger("updater");
                 let exe = std::env::current_exe()
                     .unwrap_or_else(|_| std::path::PathBuf::from("/proc/self/exe"));
                 let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
@@ -443,7 +450,8 @@ impl GitUpdater {
                 if args.len() > 1 {
                     cmd.args(&args[1..]);
                 }
-                let _ = cmd.exec();
+                let e = cmd.exec();
+                logger.warn(&format!("exec() failed: {}", e));
             }
             // Fallback: spawn new then exit
             let _ = std::process::Command::new(

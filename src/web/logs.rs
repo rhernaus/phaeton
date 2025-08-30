@@ -281,4 +281,76 @@ mod tests {
         let found = resolve_log_file_path(file.to_str().unwrap()).await;
         assert_eq!(found.unwrap(), file);
     }
+
+    #[tokio::test]
+    async fn logs_tail_returns_404_when_no_file() {
+        use axum::http::Request;
+        use tower::ServiceExt;
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut driver = crate::driver::AlfenDriver::new(rx, tx).await.unwrap();
+        // Set logging file to a non-existent path inside a tempdir, then remove the dir
+        let tmpdir = tempfile::tempdir().unwrap();
+        let missing = tmpdir.path().join("no_such.log");
+        {
+            let mut cfg = driver.config().clone();
+            cfg.logging.file = missing.to_string_lossy().to_string();
+            driver.update_config(cfg).unwrap();
+        }
+        let state = AppState {
+            driver: std::sync::Arc::new(tokio::sync::Mutex::new(driver)),
+            snapshot_rx: tokio::sync::watch::channel(std::sync::Arc::new(
+                crate::driver::DriverSnapshot {
+                    timestamp: "".into(),
+                    mode: 0,
+                    start_stop: 0,
+                    set_current: 0.0,
+                    applied_current: 0.0,
+                    station_max_current: 0.0,
+                    device_instance: 0,
+                    product_name: None,
+                    firmware: None,
+                    serial: None,
+                    status: 0,
+                    active_phases: 0,
+                    ac_power: 0.0,
+                    ac_current: 0.0,
+                    l1_voltage: 0.0,
+                    l2_voltage: 0.0,
+                    l3_voltage: 0.0,
+                    l1_current: 0.0,
+                    l2_current: 0.0,
+                    l3_current: 0.0,
+                    l1_power: 0.0,
+                    l2_power: 0.0,
+                    l3_power: 0.0,
+                    total_energy_kwh: 0.0,
+                    pricing_currency: None,
+                    energy_rate: None,
+                    session: serde_json::json!({}),
+                    poll_duration_ms: None,
+                    total_polls: 0,
+                    overrun_count: 0,
+                    poll_interval_ms: 1000,
+                    excess_pv_power_w: 0.0,
+                    modbus_connected: Some(false),
+                    driver_state: "".into(),
+                    poll_steps_ms: None,
+                },
+            ))
+            .1,
+        };
+        let router = axum::Router::new()
+            .route("/api/logs/tail", get(logs_tail))
+            .with_state(state);
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .uri("/api/logs/tail?lines=10")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::NOT_FOUND);
+    }
 }
