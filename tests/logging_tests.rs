@@ -9,3 +9,5 @@ fn should_emit_filters_below_runtime_level() {
     assert!(!should_emit_to_web(" INFO message"));
     assert!(should_emit_to_web(" ERROR something"));
 }
+
+// parse_line_level is crate-private; coverage exercised via should_emit_to_web
