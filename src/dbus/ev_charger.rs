@@ -189,6 +189,13 @@ impl EvCharger {
             .send(DriverCommand::SetCurrent(amps as f32))
             .map_err(|_| zbus::Error::Failure("Failed to enqueue SetCurrent".into()))
     }
+
+    #[zbus(property)]
+    fn set_ac_phase_count(&self, phases: u8) -> zbus::Result<()> {
+        self.commands_tx
+            .send(DriverCommand::SetPhases(phases))
+            .map_err(|_| zbus::Error::Failure("Failed to enqueue SetPhases".into()))
+    }
 }
 
 #[cfg(test)]

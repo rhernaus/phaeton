@@ -88,4 +88,5 @@ pub enum DriverCommand {
     SetMode(u8),
     SetStartStop(u8),
     SetCurrent(f32),
+    SetPhases(u8),
 }

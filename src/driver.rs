@@ -121,6 +121,19 @@ pub struct AlfenDriver {
 
     /// Per-step timings for the last completed poll cycle
     last_poll_steps: Option<crate::driver::types::PollStepDurations>,
+
+    /// Desired number of phases (1 or 3)
+    desired_phases: u8,
+    /// Last applied number of phases as known by the driver
+    applied_phases: u8,
+    /// Time when phases last changed (for grace)
+    last_phase_switch: Option<std::time::Instant>,
+    /// If currently settling after a phase switch, this is the deadline
+    phase_settle_deadline: Option<std::time::Instant>,
+
+    /// If set during a phase switch settle period, indicates the target phase count (1 or 3)
+    /// Used to expose Victron D-Bus status 22/23 (switching to 3P/1P)
+    phase_switch_to: Option<u8>,
 }
 
 impl AlfenDriver {
@@ -296,6 +309,92 @@ impl AlfenDriver {
         let _ = self.persistence.save();
         // Record the moment we changed the intended current to enable lag compensation
         self.last_set_current_monotonic = std::time::Instant::now();
+    }
+
+    /// Set desired number of phases (1 or 3). Applies immediately in Manual/Scheduled; in Auto it may be overridden.
+    pub async fn set_phases(&mut self, phases: u8) {
+        let p = if phases >= 3 { 3 } else { 1 };
+        if p != self.desired_phases {
+            self.logger.info(&format!(
+                "Desired phases changed: {} -> {}",
+                self.desired_phases, p
+            ));
+        }
+        self.desired_phases = p;
+        // In Manual or Scheduled, apply immediately
+        if !matches!(self.current_mode, ChargingMode::Auto) {
+            let _ = self.apply_phases_now(p).await;
+        }
+        if let Some(dbus) = &self.dbus {
+            let _ = dbus
+                .lock()
+                .await
+                .update_path("/Ac/PhaseCount", serde_json::json!(p))
+                .await;
+        }
+    }
+
+    async fn apply_phases_now(&mut self, p: u8) -> bool {
+        let target = if p >= 3 { 3 } else { 1 };
+        if target == self.applied_phases && self.phase_settle_deadline.is_none() {
+            return true;
+        }
+        // Stop charging during switch
+        let prev_current = self.last_sent_current;
+        // Write 0.0 A to amps register directly (avoid cross-module private call)
+        if let Some(mgr) = self.modbus_manager.as_mut() {
+            let socket_id = self.config.modbus.socket_slave_id;
+            let addr_amps = self.config.registers.amps_config;
+            let regs = crate::modbus::encode_32bit_float(0.0);
+            let _ = mgr
+                .write_multiple_registers(socket_id, addr_amps, &regs)
+                .await
+                .ok();
+        }
+        self.last_sent_current = 0.0;
+        self.last_current_set_time = std::time::Instant::now();
+
+        // Write the phases register
+        let station_id = self.config.modbus.station_slave_id;
+        let addr_phases = self.config.registers.phases;
+        let value: u16 = if target == 3 { 3 } else { 1 };
+        let write_ok = if let Some(mgr) = self.modbus_manager.as_mut() {
+            mgr.write_multiple_registers(station_id, addr_phases, &[value])
+                .await
+                .is_ok()
+        } else {
+            false
+        };
+
+        if write_ok {
+            self.applied_phases = target;
+            self.last_phase_switch = Some(std::time::Instant::now());
+            let settle = self.config.controls.phase_switch_settle_seconds as u64;
+            self.phase_settle_deadline =
+                Some(std::time::Instant::now() + std::time::Duration::from_secs(settle));
+            self.phase_switch_to = Some(target);
+            self.logger.info(&format!(
+                "Switched phases to {}P; settling for {}s (prev current {:.1} A)",
+                target, settle, prev_current
+            ));
+            // Update D-Bus to reflect switching status immediately (22/23)
+            if let Some(dbus) = &self.dbus {
+                let status_code: u8 = if target == 3 { 22 } else { 23 };
+                let _ = dbus
+                    .lock()
+                    .await
+                    .update_paths([
+                        ("/Status".to_string(), serde_json::json!(status_code)),
+                        ("/Ac/PhaseCount".to_string(), serde_json::json!(target)),
+                    ])
+                    .await;
+            }
+            true
+        } else {
+            self.logger
+                .warn("Failed to write phase configuration via Modbus");
+            false
+        }
     }
 }
 

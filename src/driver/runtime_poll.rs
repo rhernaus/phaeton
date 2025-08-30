@@ -2,6 +2,7 @@ use crate::error::Result;
 use std::sync::Arc;
 
 pub mod meas;
+mod phase;
 use meas::RealtimeMeasurements;
 
 impl super::AlfenDriver {
@@ -183,7 +184,14 @@ impl super::AlfenDriver {
     fn ev_power_for_subtract(&self, p_total: f64) -> f64 {
         let lag_ms = self.config.controls.ev_reporting_lag_ms as u128;
         if self.last_set_current_monotonic.elapsed().as_millis() < lag_ms {
-            let phases = 3.0f64;
+            let phases = if self.applied_phases >= 3 {
+                3.0
+            } else if self.applied_phases == 1 {
+                1.0
+            } else {
+                // Unknown -> assume 3P to preserve previous behavior and test expectations
+                3.0
+            };
             (self.last_sent_current as f64 * 230.0f64 * phases).max(0.0)
         } else {
             p_total
@@ -228,6 +236,8 @@ impl super::AlfenDriver {
         now_secs: f64,
         excess_pv_power_w: f32,
     ) -> (f32, Option<bool>) {
+        // Determine assumed phases for conversion based on applied phases
+        let assumed_phases = if self.applied_phases >= 3 { 3 } else { 1 };
         let mut effective: f32 = self
             .controls
             .compute_effective_current(
@@ -238,12 +248,27 @@ impl super::AlfenDriver {
                 now_secs,
                 Some(excess_pv_power_w),
                 &self.config,
+                assumed_phases,
             )
             .await
             .unwrap_or(0.0);
         let soc_below_min = self.enforce_soc_limit_maybe(&mut effective).await;
         self.apply_insufficient_solar_grace_timer(soc_below_min, &mut effective);
         (effective, soc_below_min)
+    }
+
+    fn enforce_phase_settle_on_effective(&mut self, effective: &mut f32) {
+        if let Some(deadline) = self.phase_settle_deadline {
+            if std::time::Instant::now() < deadline {
+                if *effective > 0.0 {
+                    self.logger
+                        .debug("Phase switch settling active; forcing 0 A");
+                }
+                *effective = 0.0;
+            } else {
+                self.phase_settle_deadline = None;
+            }
+        }
     }
 
     async fn enforce_soc_limit_maybe(&mut self, effective: &mut f32) -> Option<bool> {
@@ -484,9 +509,18 @@ impl super::AlfenDriver {
             };
             self.last_excess_pv_power_w = smoothed;
             let t_eff0 = std::time::Instant::now();
-            let (effective, soc_below_min) = self
+            // Phase switching logic in Auto mode with grace and settle periods
+            if matches!(self.current_mode, crate::controls::ChargingMode::Auto)
+                && self.config.controls.auto_phase_switch
+            {
+                self.evaluate_auto_phase_switch(self.last_excess_pv_power_w)
+                    .await;
+            }
+
+            let (mut effective, soc_below_min) = self
                 .compute_effective_current_with_soc(requested, now_secs, excess_pv_power_w)
                 .await;
+            self.enforce_phase_settle_on_effective(&mut effective);
             let compute_effective_ms = t_eff0.elapsed().as_millis() as u64;
 
             let (should_update, _need_change, _interval_due) =
@@ -505,7 +539,16 @@ impl super::AlfenDriver {
             }
 
             // Derive final status from base status and context
-            let derived_status = self.derive_status(m.status, soc_below_min) as u8;
+            // During phase switch settle, expose Victron statuses: 22 (to 3P) or 23 (to 1P)
+            let derived_status = if let Some(deadline) = self.phase_settle_deadline
+                && std::time::Instant::now() < deadline
+                && let Some(to) = self.phase_switch_to
+            {
+                if to >= 3 { 22 } else { 23 }
+            } else {
+                self.phase_switch_to = None;
+                self.derive_status(m.status, soc_below_min) as u8
+            };
             let t_fin0 = std::time::Instant::now();
             self.finalize_cycle(&m, derived_status, effective)?;
             let finalize_ms = t_fin0.elapsed().as_millis() as u64;
@@ -528,6 +571,8 @@ impl super::AlfenDriver {
         let _ = self.status_snapshot_tx.send(snapshot);
         Ok(())
     }
+
+    // evaluate_auto_phase_switch moved to phase.rs
 }
 
 #[cfg(test)]

@@ -180,6 +180,12 @@ impl super::AlfenDriver {
             overrun_count: 0,
             last_excess_pv_power_w: 0.0,
             last_poll_steps: None,
+
+            desired_phases: 3,
+            applied_phases: 3,
+            last_phase_switch: None,
+            phase_settle_deadline: None,
+            phase_switch_to: None,
         })
     }
 
@@ -189,6 +195,9 @@ impl super::AlfenDriver {
 
         // Initialize Modbus connection
         self.initialize_modbus().await?;
+
+        // Assert 3-phase as default on startup; Auto/Manual logic may switch to 1P later
+        let _ = self.apply_phases_now(3).await;
 
         // Update state to running
         self.state.send(super::types::DriverState::Running).ok();

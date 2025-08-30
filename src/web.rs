@@ -58,6 +58,12 @@ pub struct SetCurrentBody {
     pub amps: f32,
 }
 
+#[derive(Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SetPhasesBody {
+    pub phases: u8,
+}
+
 #[cfg_attr(feature = "openapi", utoipa::path(get, path = "/api/health", responses(
     (status = 200, description = "Service is healthy")
 )))]
@@ -128,6 +134,16 @@ async fn set_current(
 ) -> impl IntoResponse {
     let mut drv = state.driver.lock().await;
     drv.set_intended_current(body.amps).await;
+    (StatusCode::OK, Json(serde_json::json!({"ok":true})))
+}
+
+#[cfg_attr(feature = "openapi", utoipa::path(post, path = "/api/phases", request_body = SetPhasesBody, responses((status = 200))))]
+async fn set_phases(
+    State(state): State<AppState>,
+    Json(body): Json<SetPhasesBody>,
+) -> impl IntoResponse {
+    let mut drv = state.driver.lock().await;
+    drv.set_phases(body.phases).await;
     (StatusCode::OK, Json(serde_json::json!({"ok":true})))
 }
 
@@ -422,6 +438,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/mode", post(set_mode))
         .route("/api/startstop", post(set_startstop))
         .route("/api/set_current", post(set_current))
+        .route("/api/phases", post(set_phases))
         .route("/api/tibber/plan", get(tibber_plan))
         .route("/api/config", get(get_config).put(put_config))
         .route("/api/config/schema", get(get_config_schema))
